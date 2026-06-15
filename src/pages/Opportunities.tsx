@@ -1,8 +1,11 @@
 import { useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import StatusBadge from '../components/StatusBadge';
-import { opportunities } from '../data/mockData';
+import DataSourceNotice from '../components/DataSourceNotice';
+import { opportunities as mockOpportunities } from '../data/mockData';
 import type { OpportunityStatus } from '../data/types';
+import { useDataset } from '../hooks/useDataset';
+import { fetchOpportunities } from '../lib/api/sam';
 import { daysUntil, formatCurrency, formatDate } from '../lib/format';
 
 const FILTERS: { label: string; value: 'all' | OpportunityStatus }[] = [
@@ -16,6 +19,10 @@ const FILTERS: { label: string; value: 'all' | OpportunityStatus }[] = [
 export default function Opportunities() {
   const [filter, setFilter] = useState<'all' | OpportunityStatus>('all');
   const [query, setQuery] = useState('');
+  const { data: opportunities, loading, source, error } = useDataset(
+    () => fetchOpportunities(50),
+    mockOpportunities,
+  );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -28,13 +35,15 @@ export default function Opportunities() {
         o.noticeId.toLowerCase().includes(q);
       return matchesFilter && matchesQuery;
     });
-  }, [filter, query]);
+  }, [filter, query, opportunities]);
 
   return (
     <Layout
       title="Opportunities"
       subtitle="Federal solicitations and notices"
     >
+      <DataSourceNotice source={source} error={error} provider="SAM.gov" />
+
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
@@ -113,7 +122,9 @@ export default function Opportunities() {
                   colSpan={6}
                   className="px-5 py-10 text-center text-slate-400"
                 >
-                  No opportunities match your filters.
+                  {loading
+                    ? 'Loading opportunities…'
+                    : 'No opportunities match your filters.'}
                 </td>
               </tr>
             )}

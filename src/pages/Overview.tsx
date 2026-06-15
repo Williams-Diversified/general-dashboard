@@ -13,17 +13,34 @@ import {
 import Layout from '../components/Layout';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
+import DataSourceNotice from '../components/DataSourceNotice';
 import {
-  agencySpend,
-  contracts,
-  monthlySpend,
-  opportunities,
+  agencySpend as mockAgencySpend,
+  contracts as mockContracts,
+  monthlySpend as mockMonthlySpend,
+  opportunities as mockOpportunities,
 } from '../data/mockData';
+import { useDataset } from '../hooks/useDataset';
+import { fetchAgencySpending, fetchContracts, fetchMonthlySpend } from '../lib/api/usaspending';
+import { fetchOpportunities } from '../lib/api/sam';
 import { formatCurrency, formatDate } from '../lib/format';
 
 const BAR_COLORS = ['#1b3a6b', '#2563eb', '#0891b2', '#7c3aed', '#db2777', '#65a30d'];
 
 export default function Overview() {
+  const agency = useDataset(() => fetchAgencySpending(6), mockAgencySpend);
+  const monthly = useDataset(fetchMonthlySpend, mockMonthlySpend);
+  const contractsData = useDataset(() => fetchContracts(10), mockContracts);
+  const opps = useDataset(() => fetchOpportunities(25), mockOpportunities);
+
+  const agencySpend = agency.data;
+  const monthlySpend = monthly.data;
+  const contracts = contractsData.data;
+  const opportunities = opps.data;
+
+  // USAspending is live whenever either spend dataset resolved live.
+  const spendSource = agency.source === 'live' || monthly.source === 'live' ? 'live' : agency.source;
+
   const openCount = opportunities.filter(
     (o) => o.status === 'open' || o.status === 'closing-soon',
   ).length;
@@ -43,6 +60,12 @@ export default function Overview() {
       title="Overview"
       subtitle="Federal contracting activity at a glance"
     >
+      <DataSourceNotice
+        source={spendSource}
+        error={agency.error ?? monthly.error}
+        provider="USAspending.gov"
+      />
+
       {/* KPI row */}
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard

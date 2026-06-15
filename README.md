@@ -48,10 +48,42 @@ src/
   main.tsx      # entry point
 ```
 
-## Note on Data
+## Data Sources
 
-All data in `src/data/mockData.ts` is **fictional** and for demonstration only.
-Notice ids, award ids, and dollar amounts are illustrative. To connect real
-data, swap the mock arrays for fetches against a source such as the
-[SAM.gov](https://sam.gov/) or [USAspending.gov](https://www.usaspending.gov/)
-APIs.
+The app ships with **bundled demo data** (`src/data/mockData.ts`) and runs fully
+offline by default. It can also pull **live federal data**, falling back to the
+demo data whenever a request is disabled, fails, or returns nothing — so the UI
+is never empty.
+
+| Page | Live source | Key required | Browser-friendly? |
+|------|-------------|--------------|-------------------|
+| Overview (agency spend, monthly obligations) | [USAspending.gov](https://api.usaspending.gov/) | No | ✅ Yes (CORS-enabled) |
+| Contracts (recent awards) | USAspending.gov | No | ✅ Yes |
+| Opportunities (solicitations) | [SAM.gov](https://open.gsa.gov/api/get-opportunities-public-api/) | Yes | ⚠️ No — needs a proxy |
+
+### Enabling live data
+
+```bash
+cp .env.example .env.local
+# edit .env.local:
+#   VITE_USE_LIVE_DATA=true
+#   VITE_SAM_API_KEY=...   (only needed for the Opportunities page)
+npm run dev
+```
+
+Each page shows a small banner indicating whether it's displaying **live** or
+**demo** data, and why.
+
+> **SAM.gov CORS caveat:** SAM.gov's Opportunities API does not send CORS
+> headers, so a browser cannot call it directly. The Opportunities page will
+> attempt the call and gracefully fall back to demo data. For real live
+> opportunities, stand up a small proxy that injects the `api_key` server-side
+> and set `VITE_SAM_BASE` to point at it.
+
+### Implementation notes
+
+- API clients live in `src/lib/api/` (`usaspending.ts`, `sam.ts`, `http.ts`).
+- `useDataset(loader, fallback)` (`src/hooks/useDataset.ts`) handles the
+  live-vs-demo logic, loading state, and fallback.
+- USAspending returns a single current award amount per contract, so the
+  Contracts page shows obligated = total for live awards.

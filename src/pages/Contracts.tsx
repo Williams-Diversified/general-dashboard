@@ -1,16 +1,26 @@
 import Layout from '../components/Layout';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
-import { contracts } from '../data/mockData';
+import DataSourceNotice from '../components/DataSourceNotice';
+import { contracts as mockContracts } from '../data/mockData';
+import { useDataset } from '../hooks/useDataset';
+import { fetchContracts } from '../lib/api/usaspending';
 import { formatCurrency, formatCurrencyFull, formatDate } from '../lib/format';
 
 export default function Contracts() {
+  const { data: contracts, source, error } = useDataset(
+    () => fetchContracts(12),
+    mockContracts,
+  );
+
   const totalValue = contracts.reduce((s, c) => s + c.totalValue, 0);
   const totalObligated = contracts.reduce((s, c) => s + c.obligatedAmount, 0);
   const activeCount = contracts.filter((c) => c.status === 'active').length;
 
   return (
     <Layout title="Contracts" subtitle="Awarded contracts and obligations">
+      <DataSourceNotice source={source} error={error} provider="USAspending.gov" />
+
       <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <StatCard
           label="Portfolio Value"
