@@ -74,15 +74,38 @@ npm run dev
 Each page shows a small banner indicating whether it's displaying **live** or
 **demo** data, and why.
 
-> **SAM.gov CORS caveat:** SAM.gov's Opportunities API does not send CORS
-> headers, so a browser cannot call it directly. The Opportunities page will
-> attempt the call and gracefully fall back to demo data. For real live
-> opportunities, stand up a small proxy that injects the `api_key` server-side
-> and set `VITE_SAM_BASE` to point at it.
+### SAM.gov proxy (bundled)
+
+SAM.gov's Opportunities API needs an API key **and** doesn't send CORS headers,
+so the browser can't call it directly. This repo ships a small proxy that
+injects the key server-side:
+
+- **Production:** `api/sam.ts` is a serverless function — Vercel deploys any
+  file in `api/` automatically (works the same on Netlify/other Node hosts).
+- **Local dev:** a Vite middleware (`samDevProxy` in `vite.config.ts`) serves
+  the identical route at `/api/sam` during `npm run dev`.
+
+Both share `api/_samProxy.ts` and read the key from **`SAM_API_KEY`** (note: no
+`VITE_` prefix, so it stays server-side and never reaches the browser bundle).
+The client calls `/api/sam` by default (`VITE_SAM_PROXY`).
+
+```bash
+# .env.local
+VITE_USE_LIVE_DATA=true
+SAM_API_KEY=your_sam_gov_key   # server-side only
+```
+
+Deploy to Vercel:
+
+```bash
+npm i -g vercel
+vercel            # set SAM_API_KEY in the project's Environment Variables
+```
 
 ### Implementation notes
 
 - API clients live in `src/lib/api/` (`usaspending.ts`, `sam.ts`, `http.ts`).
+- The SAM proxy lives in `api/` (`sam.ts` endpoint + `_samProxy.ts` core).
 - `useDataset(loader, fallback)` (`src/hooks/useDataset.ts`) handles the
   live-vs-demo logic, loading state, and fallback.
 - USAspending returns a single current award amount per contract, so the

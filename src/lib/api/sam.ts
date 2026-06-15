@@ -47,25 +47,30 @@ function locationOf(o: SamOpportunity): string {
 }
 
 export async function fetchOpportunities(limit = 25): Promise<Opportunity[]> {
-  if (!config.samApiKey) {
-    throw new ApiError('VITE_SAM_API_KEY is not set');
-  }
-
   const to = new Date();
   const from = new Date();
   from.setFullYear(from.getFullYear() - 1);
 
   const params = new URLSearchParams({
-    api_key: config.samApiKey,
     limit: String(limit),
     postedFrom: samDate(from),
     postedTo: samDate(to),
     ptype: 'o,p,k', // solicitations, presolicitations, combined synopsis
   });
 
-  const data = await getJson<SamResponse>(
-    `${config.samBase}/opportunities/v2/search?${params.toString()}`,
-  );
+  // Preferred: our proxy injects the api_key server-side.
+  // Fallback: direct call with a client-side key (rarely works in-browser).
+  let url: string;
+  if (config.samProxy) {
+    url = `${config.samProxy}?${params.toString()}`;
+  } else if (config.samApiKey) {
+    params.set('api_key', config.samApiKey);
+    url = `${config.samBase}/opportunities/v2/search?${params.toString()}`;
+  } else {
+    throw new ApiError('No SAM.gov proxy or API key configured');
+  }
+
+  const data = await getJson<SamResponse>(url);
 
   return (data.opportunitiesData ?? []).map((o, i) => ({
     id: o.noticeId ?? `opp-${i}`,

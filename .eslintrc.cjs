@@ -12,4 +12,11 @@ module.exports = {
   rules: {
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
   },
+  overrides: [
+    {
+      // Server-side files run under Node (serverless functions, Vite config).
+      files: ['api/**/*.ts', 'vite.config.ts'],
+      env: { node: true, browser: false },
+    },
+  ],
 };
