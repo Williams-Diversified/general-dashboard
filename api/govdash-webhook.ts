@@ -61,11 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Svix sends the event type in the svix-event-type header
-  const eventType = req.headers['svix-event-type'] as string | undefined;
+  // Log all headers to find where GovDash/Svix sends the event type
+  console.log('GovDash headers:', JSON.stringify(req.headers));
+
+  const eventType = (req.headers['svix-event-type'] ?? req.headers['webhook-event-type'] ?? req.headers['x-event-type']) as string | undefined;
   const data = req.body as Record<string, unknown>;
 
-  console.log(`GovDash event: ${eventType}`, JSON.stringify(data));
+  console.log(`GovDash event type: ${eventType}`, JSON.stringify(data));
 
   if (eventType === 'v1.opportunity.create' || eventType === 'v1.opportunity.update') {
     const solicitationNumber = data.solicitationNumber as string | undefined;
