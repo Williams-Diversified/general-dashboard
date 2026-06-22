@@ -61,15 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  // Log all headers to find where GovDash/Svix sends the event type
-  console.log('GovDash headers:', JSON.stringify(req.headers));
-
-  const eventType = (req.headers['svix-event-type'] ?? req.headers['webhook-event-type'] ?? req.headers['x-event-type']) as string | undefined;
   const data = req.body as Record<string, unknown>;
+  const opportunityId = data.id as string | undefined;
 
-  console.log(`GovDash event type: ${eventType}`, JSON.stringify(data));
+  console.log('GovDash webhook received:', JSON.stringify(data));
 
-  if (eventType === 'v1.opportunity.create' || eventType === 'v1.opportunity.update') {
+  // GovDash doesn't send an event type header — detect from payload
+  if (opportunityId?.startsWith('opp_')) {
     const solicitationNumber = data.solicitationNumber as string | undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
@@ -88,9 +86,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
         : 'Unknown';
 
-      const isUpdate = eventType === 'v1.opportunity.update';
       const message = [
-        `*${isUpdate ? 'Pipeline opportunity updated' : 'New pipeline opportunity'}:* ${name ?? 'Unnamed'}`,
+        `*Pipeline opportunity:* ${name ?? 'Unnamed'}`,
         solicitationNumber ? `Solicitation: \`${solicitationNumber}\`` : null,
         naicsCode ? `NAICS: ${naicsCode}` : null,
         setAside ? `Set-aside: ${setAside}` : null,
