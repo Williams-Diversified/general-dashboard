@@ -6,6 +6,8 @@
     "api/sam.ts": {
       "includeFiles": "api/_samProxy.ts"
     },
-    "api/govdash-webhook.ts": {}
+    "api/govdash-webhook.ts": {
+      "maxDuration": 10
+    }
   }
 }
