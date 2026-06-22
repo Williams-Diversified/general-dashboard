@@ -64,23 +64,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const event = req.body as { type?: string; data?: Record<string, unknown> };
   console.log(`GovDash event received: ${event.type}`);
 
-  if (event.type === 'v1.opportunity.create') {
+  if (event.type === 'v1.opportunity.create' || event.type === 'v1.opportunity.update') {
     const data = event.data ?? {};
     const solicitationNumber = data.solicitationNumber as string | undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
     const dueDate = data.dueDate as string | undefined;
+    const setAside = (data.setAside as { value?: string } | undefined)?.value;
+    const placeOfPerformance = data.placeOfPerformance as { city?: string; state?: string } | undefined;
+    const samUrl = (data.source as { url?: string } | undefined)?.url;
 
-    console.log('New opportunity added to pipeline:', {
+    console.log('GovDash opportunity event:', {
+      type: event.type,
       name,
       solicitationNumber,
       naicsCode,
       dueDate,
     });
 
-    // TODO Phase 8: pull solicitation documents from SAM.gov using SAM_API_KEY,
-    // file them to Google Drive, post bid kickoff to the project Slack channel,
-    // and trigger the govdash-proposal-workflow skill.
+    // Post to #bids so the Claude runner and team can see new pipeline items
+    const slackToken = process.env.SLACK_BOT_TOKEN;
+    if (slackToken) {
+      const dueDateFormatted = dueDate
+        ? new Date(dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' })
+        : 'TBD';
+
+      const location = placeOfPerformance
+        ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
+        : 'Unknown';
+
+      const message = [
+        `*New pipeline opportunity${event.type === 'v1.opportunity.update' ? ' (updated)' : ''}:* ${name ?? 'Unnamed'}`,
+        solicitationNumber ? `Solicitation: \`${solicitationNumber}\`` : null,
+        naicsCode ? `NAICS: ${naicsCode}` : null,
+        setAside ? `Set-aside: ${setAside}` : null,
+        `Location: ${location}`,
+        `Due: ${dueDateFormatted}`,
+        samUrl ? `SAM.gov: ${samUrl}` : null,
+      ].filter(Boolean).join('\n');
+
+      await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${slackToken}`,
+        },
+        body: JSON.stringify({ channel: '#bids', text: message }),
+      });
+    } else {
+      console.warn('SLACK_BOT_TOKEN not set — skipping #bids notification');
+    }
   }
 
   res.status(200).json({ received: true });
