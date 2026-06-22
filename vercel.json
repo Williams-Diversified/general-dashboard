@@ -1,0 +1,11 @@
+{
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/sam.ts": {
+      "includeFiles": "api/_samProxy.ts"
+    },
+    "api/govdash-webhook.ts": {}
+  }
+}
