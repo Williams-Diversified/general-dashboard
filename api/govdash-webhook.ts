@@ -3,8 +3,8 @@ import crypto from 'node:crypto';
 /**
  * Serverless endpoint: POST /api/govdash-webhook
  *
- * Receives GovDash events via Svix. Verifies the signature, logs the event,
- * and handles v1.opportunity.create to kick off the bid workflow.
+ * Receives GovDash events via Svix. The event type is in the svix-event-type
+ * header; the body is the raw opportunity object.
  */
 
 function verifySignature(
@@ -61,12 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const event = req.body as { type?: string; eventType?: string; data?: Record<string, unknown>; payload?: Record<string, unknown> };
-  console.log('GovDash raw body:', JSON.stringify(req.body));
-  const eventType = event.type ?? event.eventType;
+  // Svix sends the event type in the svix-event-type header
+  const eventType = req.headers['svix-event-type'] as string | undefined;
+  const data = req.body as Record<string, unknown>;
+
+  console.log(`GovDash event: ${eventType}`, JSON.stringify(data));
 
   if (eventType === 'v1.opportunity.create' || eventType === 'v1.opportunity.update') {
-    const data = event.data ?? event.payload ?? {};
     const solicitationNumber = data.solicitationNumber as string | undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
@@ -75,15 +76,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const placeOfPerformance = data.placeOfPerformance as { city?: string; state?: string } | undefined;
     const samUrl = (data.source as { url?: string } | undefined)?.url;
 
-    console.log('GovDash opportunity event:', {
-      type: eventType,
-      name,
-      solicitationNumber,
-      naicsCode,
-      dueDate,
-    });
-
-    // Post to #bids so the Claude runner and team can see new pipeline items
     const slackToken = process.env.SLACK_BOT_TOKEN;
     if (slackToken) {
       const dueDateFormatted = dueDate
@@ -94,17 +86,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
         : 'Unknown';
 
+      const isUpdate = eventType === 'v1.opportunity.update';
       const message = [
-        `*New pipeline opportunity${event.type === 'v1.opportunity.update' ? ' (updated)' : ''}:* ${name ?? 'Unnamed'}`,
+        `*${isUpdate ? 'Pipeline opportunity updated' : 'New pipeline opportunity'}:* ${name ?? 'Unnamed'}`,
         solicitationNumber ? `Solicitation: \`${solicitationNumber}\`` : null,
         naicsCode ? `NAICS: ${naicsCode}` : null,
         setAside ? `Set-aside: ${setAside}` : null,
-        `Location: ${location}`,
+        location ? `Location: ${location}` : null,
         `Due: ${dueDateFormatted}`,
         samUrl ? `SAM.gov: ${samUrl}` : null,
       ].filter(Boolean).join('\n');
 
-      await fetch('https://slack.com/api/chat.postMessage', {
+      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -112,6 +105,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         },
         body: JSON.stringify({ channel: '#bids', text: message }),
       });
+
+      const slackData = await slackRes.json() as { ok: boolean; error?: string };
+      if (!slackData.ok) {
+        console.error('Slack post failed:', slackData.error);
+      } else {
+        console.log('Posted to #bids successfully');
+      }
     } else {
       console.warn('SLACK_BOT_TOKEN not set — skipping #bids notification');
     }
