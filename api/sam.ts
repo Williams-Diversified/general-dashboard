@@ -1,4 +1,4 @@
-import { proxySamSearch } from './_samProxy';
+import { proxySamSearch } from './_samProxy.js';
 
 /**
  * Serverless endpoint: GET /api/sam?limit=&postedFrom=&postedTo=&ptype=...

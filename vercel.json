@@ -4,7 +4,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/sam.ts": {
-      "includeFiles": "api/_samProxy.ts"
+      "maxDuration": 10
     },
     "api/govdash-webhook.ts": {
       "maxDuration": 10
