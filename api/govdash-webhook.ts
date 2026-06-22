@@ -61,11 +61,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const event = req.body as { type?: string; data?: Record<string, unknown> };
-  console.log(`GovDash event received: ${event.type}`);
+  const event = req.body as { type?: string; eventType?: string; data?: Record<string, unknown>; payload?: Record<string, unknown> };
+  console.log('GovDash raw body:', JSON.stringify(req.body));
+  const eventType = event.type ?? event.eventType;
 
-  if (event.type === 'v1.opportunity.create' || event.type === 'v1.opportunity.update') {
-    const data = event.data ?? {};
+  if (eventType === 'v1.opportunity.create' || eventType === 'v1.opportunity.update') {
+    const data = event.data ?? event.payload ?? {};
     const solicitationNumber = data.solicitationNumber as string | undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
@@ -75,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const samUrl = (data.source as { url?: string } | undefined)?.url;
 
     console.log('GovDash opportunity event:', {
-      type: event.type,
+      type: eventType,
       name,
       solicitationNumber,
       naicsCode,
