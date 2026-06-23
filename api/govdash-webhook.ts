@@ -106,17 +106,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${slackToken}`,
         },
-        body: JSON.stringify({ channel: '#bids', text: message }),
+        body: JSON.stringify({ channel: '#pipeline', text: message }),
       });
 
       const slackData = await slackRes.json() as { ok: boolean; error?: string };
       if (!slackData.ok) {
         console.error('Slack post failed:', slackData.error);
       } else {
-        console.log('Posted to #bids successfully');
+        console.log('Posted to #pipeline successfully');
       }
     } else {
-      console.warn('SLACK_BOT_TOKEN not set — skipping #bids notification');
+      console.warn('SLACK_BOT_TOKEN not set — skipping #pipeline notification');
     }
   }
 
