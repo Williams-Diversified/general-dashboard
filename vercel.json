@@ -8,6 +8,9 @@
     },
     "api/govdash-webhook.ts": {
       "maxDuration": 10
+    },
+    "api/sam-docs.ts": {
+      "maxDuration": 15
     }
   }
 }
