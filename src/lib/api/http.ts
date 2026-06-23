@@ -17,7 +17,18 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
     if (!res.ok) {
-      throw new ApiError(`Request to ${url} failed`, res.status);
+      let detail = '';
+      try {
+        const body = await res.json() as Record<string, unknown>;
+        detail = body.error
+          ? ` — ${body.error}`
+          : body.description
+          ? ` — ${body.description}`
+          : ` — ${JSON.stringify(body).slice(0, 200)}`;
+      } catch {
+        // non-JSON error body, ignore
+      }
+      throw new ApiError(`Request to ${url} failed (${res.status})${detail}`, res.status);
     }
     return (await res.json()) as T;
   } catch (err) {
