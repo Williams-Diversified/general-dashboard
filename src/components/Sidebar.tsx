@@ -9,11 +9,13 @@ const NAV = [
 export default function Sidebar() {
   return (
     <aside className="flex w-60 flex-col bg-navy-800 text-slate-100">
-      <div className="flex items-center gap-2 px-6 py-5 text-xl font-bold tracking-tight">
-        <span className="text-2xl" aria-hidden>
-          ★
-        </span>
-        GovDash
+      <div className="px-6 py-5 leading-tight">
+        <div className="text-base font-bold tracking-tight text-gold-primary">
+          Williams Diversified
+        </div>
+        <div className="text-xs font-medium text-slate-400 tracking-wide uppercase mt-0.5">
+          General Dashboard
+        </div>
       </div>
       <nav className="flex-1 space-y-1 px-3">
         {NAV.map((item) => (
@@ -24,7 +26,7 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-navy-600 text-white'
+                  ? 'bg-navy-600 text-navy-800 font-semibold'
                   : 'text-slate-300 hover:bg-navy-700 hover:text-white'
               }`
             }

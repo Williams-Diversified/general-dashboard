@@ -4,14 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Federal-inspired palette
+        // Williams Diversified brand palette
         navy: {
-          50: '#eef2f7',
-          100: '#dbe4ee',
-          600: '#1b3a6b',
-          700: '#142d54',
-          800: '#0f2440',
-          900: '#0a1a2f',
+          50:  '#fdf8e7',
+          100: '#F5DFA3',
+          600: '#D4AF37',
+          700: '#2B2B2B',
+          800: '#0A0A0A',
+          900: '#000000',
+        },
+        gold: {
+          primary:  '#D4AF37',
+          deep:     '#A67C00',
+          highlight:'#F5DFA3',
+          molten:   '#C89B2B',
         },
       },
       fontFamily: {

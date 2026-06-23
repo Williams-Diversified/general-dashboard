@@ -25,8 +25,8 @@ export default function Layout({ title, subtitle, children }: LayoutProps) {
               placeholder="Search…"
               className="hidden w-64 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-navy-600 focus:outline-none focus:ring-1 focus:ring-navy-600 sm:block"
             />
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-navy-600 text-sm font-semibold text-white">
-              ND
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-navy-600 text-sm font-semibold text-navy-800">
+              WD
             </div>
           </div>
         </header>
