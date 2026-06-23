@@ -77,7 +77,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const samUrl = (data.source as { url?: string } | undefined)?.url;
 
     const slackToken = process.env.SLACK_BOT_TOKEN;
-    console.log('SLACK_BOT_TOKEN present:', !!slackToken, '| keys:', Object.keys(process.env).filter(k => k.includes('SLACK')));
     if (slackToken) {
       const dueDateFormatted = dueDate
         ? new Date(dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' })
