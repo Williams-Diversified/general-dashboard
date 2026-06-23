@@ -11,6 +11,9 @@
     },
     "api/sam-docs.ts": {
       "maxDuration": 15
+    },
+    "api/slack-post.ts": {
+      "maxDuration": 10
     }
   }
 }
