@@ -49,7 +49,7 @@ function locationOf(o: SamOpportunity): string {
 export async function fetchOpportunities(limit = 25): Promise<Opportunity[]> {
   const to = new Date();
   const from = new Date();
-  from.setFullYear(from.getFullYear() - 1);
+  from.setDate(from.getDate() - 364); // SAM.gov rejects exactly 1-year spans
 
   const params = new URLSearchParams({
     limit: String(limit),
