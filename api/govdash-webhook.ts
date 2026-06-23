@@ -66,8 +66,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   console.log('GovDash webhook received:', JSON.stringify(data));
 
-  // GovDash doesn't send an event type header — detect from payload
-  if (opportunityId?.startsWith('opp_')) {
+  // GovDash doesn't send an event type header. Distinguish creates from phase
+  // moves by checking for the presence of 'name' — phase updates only contain
+  // id and phase, while new opportunity payloads include all fields.
+  const isNewOpportunity = opportunityId?.startsWith('opp_') && typeof data.name === 'string';
+
+  if (isNewOpportunity) {
     const solicitationNumber = data.solicitationNumber as string | undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
