@@ -86,23 +86,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     // Step 2 — fetch attachments/resources for this notice
     const resourcesUrl = `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}/resources?api_key=${key}`;
     const resourcesRes = await fetch(resourcesUrl);
+    const resourcesStatus = resourcesRes.status;
     const resourcesText = await resourcesRes.text();
 
     let resources: unknown[] = [];
+    let resourcesDebug: unknown = null;
     try {
       const resourcesData = JSON.parse(resourcesText) as Record<string, unknown>;
-      // SAM.gov returns attachments under either 'attachments' or 'opportunityAttachments'
-      const raw = (resourcesData.attachments ?? resourcesData.opportunityAttachments ?? []) as Record<string, unknown>[];
+      resourcesDebug = resourcesData; // expose full response for debugging
+      // SAM.gov returns attachments under various keys depending on version
+      const raw = (
+        resourcesData.attachments ??
+        resourcesData.opportunityAttachments ??
+        resourcesData.attachmentList ??
+        resourcesData.fileInfoList ??
+        []
+      ) as Record<string, unknown>[];
       resources = raw.map(r => ({
-        name: r.name ?? r.filename,
-        type: r.type ?? r.mimeType,
-        fileSize: r.fileSize,
-        resourceId: r.resourceId ?? r.attachmentId,
-        downloadUrl: `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}/resources/${r.resourceId ?? r.attachmentId}/download?api_key=${key}`,
+        name: r.name ?? r.filename ?? r.attachmentFilename,
+        type: r.type ?? r.mimeType ?? r.contentType,
+        fileSize: r.fileSize ?? r.size,
+        resourceId: r.resourceId ?? r.attachmentId ?? r.fileId,
+        downloadUrl: `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}/resources/${r.resourceId ?? r.attachmentId ?? r.fileId}/download?api_key=${key}`,
       }));
     } catch {
-      // Resources fetch failed — return opportunity data without attachments
-      console.warn('Could not parse SAM.gov resources response:', resourcesText.slice(0, 200));
+      console.warn('Could not parse SAM.gov resources response:', resourcesText.slice(0, 300));
     }
 
     const pop = opp?.placeOfPerformance as Record<string, unknown> | undefined;
@@ -123,6 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       description: opp?.description,
       samUrl: `https://sam.gov/opp/${noticeId}/view`,
       resources,
+      _debug: { resourcesStatus, resourcesDebug },
     });
   } catch (err) {
     console.error('sam-docs error:', err);
