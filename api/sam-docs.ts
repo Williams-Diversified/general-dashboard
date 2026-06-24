@@ -42,7 +42,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let opp: Record<string, unknown> | null = null;
 
     if (noticeIdParam) {
-      // Fast path — notice ID extracted directly from the SAM.gov URL, no search needed
+      // Use the noticeId to find the full opportunity via keyword search so we
+      // get both metadata and resourceLinks. The /resources endpoint on api.sam.gov
+      // is unreliable for DoD agencies — resource links embedded in the search
+      // result are more consistently populated.
+      const hits = await searchSam({ q: noticeIdParam });
+      const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
+      if (match) opp = match;
       noticeId = noticeIdParam;
     } else {
       // Search path — find the opportunity by solicitation number with fallbacks
@@ -93,8 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let resourcesDebug: unknown = null;
     try {
       const resourcesData = JSON.parse(resourcesText) as Record<string, unknown>;
-      resourcesDebug = resourcesData; // expose full response for debugging
-      // SAM.gov returns attachments under various keys depending on version
+      resourcesDebug = resourcesData;
       const raw = (
         resourcesData.attachments ??
         resourcesData.opportunityAttachments ??
@@ -111,6 +116,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       }));
     } catch {
       console.warn('Could not parse SAM.gov resources response:', resourcesText.slice(0, 300));
+    }
+
+    // Fallback: extract resourceLinks from the opportunity detail itself.
+    // These are external links (e.g. PIEE, eBuy, agency portals) that SAM.gov
+    // surfaces when binary attachments are hosted elsewhere.
+    if (resources.length === 0 && opp) {
+      const links = (opp.resourceLinks ?? opp.additionalInfoLink) as string[] | string | undefined;
+      const linkArr = Array.isArray(links) ? links : links ? [links] : [];
+      if (linkArr.length > 0) {
+        resources = linkArr.map((url, i) => ({
+          name: `Document link ${i + 1}`,
+          type: 'link',
+          fileSize: null,
+          resourceId: null,
+          downloadUrl: url,
+        }));
+      }
     }
 
     const pop = opp?.placeOfPerformance as Record<string, unknown> | undefined;
