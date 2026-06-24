@@ -36,26 +36,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    // Step 1 — find the opportunity by solicitation number
-    const searchUrl = `${SAM_BASE}/opportunities/v2/search?limit=1&solicitationNumber=${encodeURIComponent(solicitationNumber)}&api_key=${key}`;
-    const searchRes = await fetch(searchUrl);
-    const searchText = await searchRes.text();
-
-    let searchData: Record<string, unknown>;
-    try {
-      searchData = JSON.parse(searchText) as Record<string, unknown>;
-    } catch {
-      res.status(502).json({ error: 'SAM.gov returned non-JSON', detail: searchText.slice(0, 300) });
-      return;
+    // Step 1 — find the opportunity by solicitation number.
+    // Try exact solicitationNumber param first; fall back to keyword search (q=)
+    // because SAM.gov doesn't reliably index all agencies under solicitationNumber.
+    async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
+      const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
+      const res = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text) as Record<string, unknown>;
+        return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
+      } catch {
+        return [];
+      }
     }
 
-    const opportunities = searchData.opportunitiesData as Record<string, unknown>[] | undefined;
-    if (!opportunities || opportunities.length === 0) {
+    let opportunities = await searchSam({ solicitationNumber });
+
+    // Fallback 1: keyword search on the full solicitation number
+    if (opportunities.length === 0) {
+      opportunities = await searchSam({ q: solicitationNumber });
+    }
+
+    // Fallback 2: keyword search without trailing suffix (e.g. "FA462626R0014" → "FA462626R")
+    if (opportunities.length === 0) {
+      const stem = solicitationNumber.replace(/\d{4}$/, '');
+      if (stem !== solicitationNumber) {
+        opportunities = await searchSam({ q: stem });
+      }
+    }
+
+    if (opportunities.length === 0) {
       res.status(404).json({ error: 'Opportunity not found', solicitationNumber });
       return;
     }
 
-    const opp = opportunities[0];
+    // Pick the best match — prefer exact solicitation number match if multiple returned
+    const opp =
+      opportunities.find(o => (o.solicitationNumber as string)?.toUpperCase() === solicitationNumber.toUpperCase()) ??
+      opportunities[0];
+
     const noticeId = opp.noticeId as string;
 
     // Step 2 — fetch attachments/resources for this notice
