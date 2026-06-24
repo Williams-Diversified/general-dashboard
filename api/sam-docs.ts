@@ -30,53 +30,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const solicitationNumber = req.query.solicitationNumber as string | undefined;
-  if (!solicitationNumber) {
-    res.status(400).json({ error: 'solicitationNumber query param is required' });
+  const noticeIdParam = req.query.noticeId as string | undefined;
+
+  if (!solicitationNumber && !noticeIdParam) {
+    res.status(400).json({ error: 'solicitationNumber or noticeId query param is required' });
     return;
   }
 
   try {
-    // Step 1 — find the opportunity by solicitation number.
-    // Try exact solicitationNumber param first; fall back to keyword search (q=)
-    // because SAM.gov doesn't reliably index all agencies under solicitationNumber.
-    async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
-      const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
-      const res = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
-      const text = await res.text();
-      try {
-        const data = JSON.parse(text) as Record<string, unknown>;
-        return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
-      } catch {
-        return [];
+    let noticeId: string;
+    let opp: Record<string, unknown> | null = null;
+
+    if (noticeIdParam) {
+      // Fast path — notice ID extracted directly from the SAM.gov URL, no search needed
+      noticeId = noticeIdParam;
+    } else {
+      // Search path — find the opportunity by solicitation number with fallbacks
+      async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
+        const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
+        const res = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text) as Record<string, unknown>;
+          return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
+        } catch {
+          return [];
+        }
       }
-    }
 
-    let opportunities = await searchSam({ solicitationNumber });
+      let opportunities = await searchSam({ solicitationNumber: solicitationNumber! });
 
-    // Fallback 1: keyword search on the full solicitation number
-    if (opportunities.length === 0) {
-      opportunities = await searchSam({ q: solicitationNumber });
-    }
-
-    // Fallback 2: keyword search without trailing suffix (e.g. "FA462626R0014" → "FA462626R")
-    if (opportunities.length === 0) {
-      const stem = solicitationNumber.replace(/\d{4}$/, '');
-      if (stem !== solicitationNumber) {
-        opportunities = await searchSam({ q: stem });
+      if (opportunities.length === 0) {
+        opportunities = await searchSam({ q: solicitationNumber! });
       }
+
+      if (opportunities.length === 0) {
+        const stem = solicitationNumber!.replace(/\d{4}$/, '');
+        if (stem !== solicitationNumber) {
+          opportunities = await searchSam({ q: stem });
+        }
+      }
+
+      if (opportunities.length === 0) {
+        res.status(404).json({ error: 'Opportunity not found', solicitationNumber });
+        return;
+      }
+
+      opp =
+        opportunities.find(o => (o.solicitationNumber as string)?.toUpperCase() === solicitationNumber!.toUpperCase()) ??
+        opportunities[0];
+
+      noticeId = opp.noticeId as string;
     }
-
-    if (opportunities.length === 0) {
-      res.status(404).json({ error: 'Opportunity not found', solicitationNumber });
-      return;
-    }
-
-    // Pick the best match — prefer exact solicitation number match if multiple returned
-    const opp =
-      opportunities.find(o => (o.solicitationNumber as string)?.toUpperCase() === solicitationNumber.toUpperCase()) ??
-      opportunities[0];
-
-    const noticeId = opp.noticeId as string;
 
     // Step 2 — fetch attachments/resources for this notice
     const resourcesUrl = `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}/resources?api_key=${key}`;
@@ -100,22 +105,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       console.warn('Could not parse SAM.gov resources response:', resourcesText.slice(0, 200));
     }
 
-    const pop = opp.placeOfPerformance as Record<string, unknown> | undefined;
+    const pop = opp?.placeOfPerformance as Record<string, unknown> | undefined;
     const location = pop
       ? `${(pop.city as Record<string, unknown>)?.name ?? ''}, ${(pop.state as Record<string, unknown>)?.code ?? ''}`.replace(/^,\s*/, '')
       : undefined;
 
     res.status(200).json({
       noticeId,
-      solicitationNumber: opp.solicitationNumber,
-      title: opp.title,
-      agency: opp.fullParentPathName ?? opp.organizationHierarchy,
-      naicsCode: opp.naicsCode,
-      setAside: opp.typeOfSetAsideDescription ?? opp.typeOfSetAside,
-      responseDeadLine: opp.responseDeadLine,
-      postedDate: opp.postedDate,
+      solicitationNumber: opp?.solicitationNumber ?? solicitationNumber,
+      title: opp?.title,
+      agency: opp?.fullParentPathName ?? opp?.organizationHierarchy,
+      naicsCode: opp?.naicsCode,
+      setAside: opp?.typeOfSetAsideDescription ?? opp?.typeOfSetAside,
+      responseDeadLine: opp?.responseDeadLine,
+      postedDate: opp?.postedDate,
       location,
-      description: opp.description,
+      description: opp?.description,
       samUrl: `https://sam.gov/opp/${noticeId}/view`,
       resources,
     });
