@@ -52,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     let noticeId: string;
     let opp: Record<string, unknown> | null = null;
+    let detailDebug: unknown = null;
 
     if (noticeIdParam) {
       // Fetch the opportunity directly by noticeId using the detail endpoint.
@@ -61,11 +62,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       const detailText = await detailRes.text();
       try {
         const detailData = JSON.parse(detailText) as Record<string, unknown>;
+        detailDebug = { status: detailRes.status, keys: Object.keys(detailData), sample: detailText.slice(0, 500) };
         if (detailRes.ok && detailData.noticeId) {
           opp = detailData;
+        } else if (detailRes.ok) {
+          // Some endpoints wrap the result — check common wrappers
+          const wrapped = (detailData.opportunityDetail ?? detailData.data ?? detailData.opportunity) as Record<string, unknown> | undefined;
+          if (wrapped?.noticeId) opp = wrapped;
         }
       } catch {
-        // fall through with opp = null
+        detailDebug = { status: detailRes.status, raw: detailText.slice(0, 500) };
       }
       // Fallback: keyword search if direct lookup didn't return usable data
       if (!opp) {
@@ -164,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       description: opp?.description,
       samUrl: `https://sam.gov/opp/${noticeId}/view`,
       resources,
-      _debug: { resourcesStatus, resourcesDebug },
+      _debug: { resourcesStatus, resourcesDebug, detailDebug },
     });
   } catch (err) {
     console.error('sam-docs error:', err);
