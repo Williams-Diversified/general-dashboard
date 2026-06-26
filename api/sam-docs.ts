@@ -37,14 +37,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  const searchDebugLog: unknown[] = [];
   async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
     const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
     const r = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
     const text = await r.text();
     try {
       const data = JSON.parse(text) as Record<string, unknown>;
-      return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
+      const results = (data.opportunitiesData as Record<string, unknown>[]) ?? [];
+      searchDebugLog.push({ params, status: r.status, count: results.length });
+      return results;
     } catch {
+      searchDebugLog.push({ params, status: r.status, raw: text.slice(0, 200) });
       return [];
     }
   }
@@ -73,9 +77,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       } catch {
         detailDebug = { status: detailRes.status, raw: detailText.slice(0, 500) };
       }
-      // Fallback: keyword search if direct lookup didn't return usable data
+      // Fallback 1: search by noticeid parameter
+      if (!opp) {
+        const hits = await searchSam({ noticeid: noticeIdParam });
+        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
+        if (match) opp = match;
+      }
+      // Fallback 2: keyword search
       if (!opp) {
         const hits = await searchSam({ q: noticeIdParam });
+        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
+        if (match) opp = match;
+      }
+      // Fallback 3: try inactive/award notices
+      if (!opp) {
+        const hits = await searchSam({ noticeid: noticeIdParam, status: 'inactive' });
         const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
         if (match) opp = match;
       }
@@ -170,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       description: opp?.description,
       samUrl: `https://sam.gov/opp/${noticeId}/view`,
       resources,
-      _debug: { resourcesStatus, resourcesDebug, detailDebug },
+      _debug: { resourcesStatus, resourcesDebug, detailDebug, searchDebugLog },
     });
   } catch (err) {
     console.error('sam-docs error:', err);
