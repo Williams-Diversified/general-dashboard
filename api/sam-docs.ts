@@ -37,18 +37,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const searchDebugLog: unknown[] = [];
   async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
     const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
     const r = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
     const text = await r.text();
     try {
       const data = JSON.parse(text) as Record<string, unknown>;
-      const results = (data.opportunitiesData as Record<string, unknown>[]) ?? [];
-      searchDebugLog.push({ params, status: r.status, count: results.length });
-      return results;
+      return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
     } catch {
-      searchDebugLog.push({ params, status: r.status, raw: text.slice(0, 200) });
       return [];
     }
   }
@@ -56,44 +52,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     let noticeId: string;
     let opp: Record<string, unknown> | null = null;
-    let detailDebug: unknown = null;
 
     if (noticeIdParam) {
-      // Fetch the opportunity directly by noticeId using the detail endpoint.
       noticeId = noticeIdParam;
-      const detailUrl = `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}?api_key=${key}`;
-      const detailRes = await fetch(detailUrl);
-      const detailText = await detailRes.text();
-      try {
-        const detailData = JSON.parse(detailText) as Record<string, unknown>;
-        detailDebug = { status: detailRes.status, keys: Object.keys(detailData), sample: detailText.slice(0, 500) };
-        if (detailRes.ok && detailData.noticeId) {
-          opp = detailData;
-        } else if (detailRes.ok) {
-          // Some endpoints wrap the result — check common wrappers
-          const wrapped = (detailData.opportunityDetail ?? detailData.data ?? detailData.opportunity) as Record<string, unknown> | undefined;
-          if (wrapped?.noticeId) opp = wrapped;
-        }
-      } catch {
-        detailDebug = { status: detailRes.status, raw: detailText.slice(0, 500) };
-      }
-      // Fallback 1: search by noticeid parameter
+      // Primary: search by noticeid parameter (direct detail endpoint returns 404 for some notices)
+      const hits = await searchSam({ noticeid: noticeIdParam });
+      const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
+      if (match) opp = match;
+      // Fallback: try inactive/award notices
       if (!opp) {
-        const hits = await searchSam({ noticeid: noticeIdParam });
-        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
-        if (match) opp = match;
-      }
-      // Fallback 2: keyword search
-      if (!opp) {
-        const hits = await searchSam({ q: noticeIdParam });
-        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
-        if (match) opp = match;
-      }
-      // Fallback 3: try inactive/award notices
-      if (!opp) {
-        const hits = await searchSam({ noticeid: noticeIdParam, status: 'inactive' });
-        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
-        if (match) opp = match;
+        const inactiveHits = await searchSam({ noticeid: noticeIdParam, status: 'inactive' });
+        const inactiveMatch = inactiveHits.find(o => (o.noticeId as string) === noticeIdParam) ?? inactiveHits[0];
+        if (inactiveMatch) opp = inactiveMatch;
       }
     } else {
       // Search path — find the opportunity by solicitation number with fallbacks
@@ -122,17 +92,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       noticeId = opp.noticeId as string;
     }
 
+    if (!opp) {
+      res.status(404).json({ error: 'Opportunity not found', noticeId: noticeIdParam ?? undefined, solicitationNumber });
+      return;
+    }
+
     // Step 2 — fetch attachments/resources for this notice
     const resourcesUrl = `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}/resources?api_key=${key}`;
     const resourcesRes = await fetch(resourcesUrl);
-    const resourcesStatus = resourcesRes.status;
     const resourcesText = await resourcesRes.text();
 
     let resources: unknown[] = [];
-    let resourcesDebug: unknown = null;
     try {
       const resourcesData = JSON.parse(resourcesText) as Record<string, unknown>;
-      resourcesDebug = resourcesData;
       const raw = (
         resourcesData.attachments ??
         resourcesData.opportunityAttachments ??
@@ -186,7 +158,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       description: opp?.description,
       samUrl: `https://sam.gov/opp/${noticeId}/view`,
       resources,
-      _debug: { resourcesStatus, resourcesDebug, detailDebug, searchDebugLog },
     });
   } catch (err) {
     console.error('sam-docs error:', err);
