@@ -54,14 +54,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     let opp: Record<string, unknown> | null = null;
 
     if (noticeIdParam) {
-      // Use the noticeId to find the full opportunity via keyword search so we
-      // get both metadata and resourceLinks. The /resources endpoint on api.sam.gov
-      // is unreliable for DoD agencies — resource links embedded in the search
-      // result are more consistently populated.
-      const hits = await searchSam({ q: noticeIdParam });
-      const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
-      if (match) opp = match;
+      // Fetch the opportunity directly by noticeId using the detail endpoint.
       noticeId = noticeIdParam;
+      const detailUrl = `${SAM_BASE}/opportunities/v2/opportunities/${noticeId}?api_key=${key}`;
+      const detailRes = await fetch(detailUrl);
+      const detailText = await detailRes.text();
+      try {
+        const detailData = JSON.parse(detailText) as Record<string, unknown>;
+        if (detailRes.ok && detailData.noticeId) {
+          opp = detailData;
+        }
+      } catch {
+        // fall through with opp = null
+      }
+      // Fallback: keyword search if direct lookup didn't return usable data
+      if (!opp) {
+        const hits = await searchSam({ q: noticeIdParam });
+        const match = hits.find(o => (o.noticeId as string) === noticeIdParam) ?? hits[0];
+        if (match) opp = match;
+      }
     } else {
       // Search path — find the opportunity by solicitation number with fallbacks
       let opportunities = await searchSam({ solicitationNumber: solicitationNumber! });
