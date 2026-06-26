@@ -37,6 +37,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
+    const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
+    const r = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
+    const text = await r.text();
+    try {
+      const data = JSON.parse(text) as Record<string, unknown>;
+      return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   try {
     let noticeId: string;
     let opp: Record<string, unknown> | null = null;
@@ -52,18 +64,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       noticeId = noticeIdParam;
     } else {
       // Search path — find the opportunity by solicitation number with fallbacks
-      async function searchSam(params: Record<string, string>): Promise<Record<string, unknown>[]> {
-        const qs = new URLSearchParams({ limit: '5', api_key: key as string, ...params });
-        const res = await fetch(`${SAM_BASE}/opportunities/v2/search?${qs}`);
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text) as Record<string, unknown>;
-          return (data.opportunitiesData as Record<string, unknown>[]) ?? [];
-        } catch {
-          return [];
-        }
-      }
-
       let opportunities = await searchSam({ solicitationNumber: solicitationNumber! });
 
       if (opportunities.length === 0) {
