@@ -14,6 +14,9 @@
     },
     "api/slack-post.ts": {
       "maxDuration": 10
+    },
+    "api/slack-delete.ts": {
+      "maxDuration": 10
     }
   }
 }
