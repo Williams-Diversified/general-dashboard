@@ -42,6 +42,69 @@ interface VercelResponse {
   json(body: unknown): void;
 }
 
+/**
+ * Persistent dedup ledger backed by Vercel KV (Upstash Redis REST API).
+ *
+ * The initial #pipeline post is the only signal the runner acts on, but posts
+ * get deleted during cleanup. Scanning the channel would miss anything already
+ * removed, so we keep a durable record of every opportunity we have ever posted
+ * keyed by GovDash id, solicitation number, and SAM.gov notice id. GovDash can
+ * re-fire the webhook for the same opportunity (re-create, phase churn); this
+ * stops those from producing duplicate pipeline posts.
+ *
+ * These env vars are injected automatically when the Vercel KV / Upstash
+ * integration is attached to the project. If they are absent (or the store is
+ * unreachable) we FAIL OPEN and post anyway - a duplicate post is a smaller
+ * problem than silently dropping a real opportunity.
+ */
+const KV_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+
+async function kvCommand(command: string[]): Promise<unknown> {
+  const path = command.map(encodeURIComponent).join('/');
+  const res = await fetch(`${KV_URL}/${path}`, {
+    headers: { Authorization: `Bearer ${KV_TOKEN}` },
+  });
+  const data = (await res.json()) as { result?: unknown; error?: string };
+  if (data.error) throw new Error(data.error);
+  return data.result;
+}
+
+async function alreadyPosted(keys: string[]): Promise<boolean> {
+  if (!KV_URL || !KV_TOKEN || keys.length === 0) return false;
+  try {
+    const result = await kvCommand(['exists', ...keys]);
+    return typeof result === 'number' && result > 0;
+  } catch (err) {
+    console.warn('KV dedup check failed - failing open (will post):', err);
+    return false;
+  }
+}
+
+async function markPosted(keys: string[], name: string): Promise<void> {
+  if (!KV_URL || !KV_TOKEN) return;
+  for (const key of keys) {
+    try {
+      await kvCommand(['set', key, name]);
+    } catch (err) {
+      console.warn('KV mark-posted failed for', key, err);
+    }
+  }
+}
+
+function buildDedupKeys(
+  opportunityId: string | undefined,
+  solicitationNumber: string | undefined,
+  samUrl: string | undefined,
+): string[] {
+  const noticeId = samUrl?.match(/\/opp\/([0-9a-f]{32})/i)?.[1];
+  return [
+    opportunityId ? `pipeline:seen:opp:${opportunityId}` : null,
+    solicitationNumber ? `pipeline:seen:sol:${solicitationNumber.toUpperCase()}` : null,
+    noticeId ? `pipeline:seen:notice:${noticeId.toLowerCase()}` : null,
+  ].filter((k): k is string => k !== null);
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -80,6 +143,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const placeOfPerformance = data.placeOfPerformance as { city?: string; state?: string } | undefined;
     const samUrl = (data.source as { url?: string } | undefined)?.url;
 
+    // Skip anything already in the durable ledger, even if its Slack post was deleted.
+    const dedupKeys = buildDedupKeys(opportunityId, solicitationNumber, samUrl);
+    if (await alreadyPosted(dedupKeys)) {
+      console.log('Opportunity already posted to #pipeline (ledger hit), skipping:', name);
+      res.status(200).json({ received: true, skipped: 'duplicate' });
+      return;
+    }
+
     const slackToken = process.env.SLACK_BOT_TOKEN;
     if (slackToken) {
       const dueDateFormatted = dueDate
@@ -114,6 +185,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         console.error('Slack post failed:', slackData.error);
       } else {
         console.log('Posted to #pipeline successfully');
+        // Record in the ledger only after a successful post so a failed post can retry.
+        await markPosted(dedupKeys, name ?? 'Unnamed');
       }
     } else {
       console.warn('SLACK_BOT_TOKEN not set — skipping #pipeline notification');
