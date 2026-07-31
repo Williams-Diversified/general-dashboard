@@ -53,12 +53,31 @@ interface VercelResponse {
  * stops those from producing duplicate pipeline posts.
  *
  * These env vars are injected automatically when the Vercel KV / Upstash
- * integration is attached to the project. If they are absent (or the store is
- * unreachable) we FAIL OPEN and post anyway - a duplicate post is a smaller
- * problem than silently dropping a real opportunity.
+ * integration is attached to the project. If they are absent, or the store is
+ * unreachable, we do NOT simply post anyway: that silent fail-open is what let
+ * one requirement reach #pipeline two dozen times. Instead the degradation is
+ * logged as an error and dedup falls back to scanning Slack history, so the
+ * worst case is a weaker check rather than no check. We still never drop a real
+ * opportunity - if both the ledger and the fallback are unavailable, we post.
  */
 const KV_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+const KV_CONFIGURED = Boolean(KV_URL && KV_TOKEN);
+
+/** #pipeline channel id, used by the Slack-history dedup fallback. */
+const PIPELINE_CHANNEL_ID = process.env.PIPELINE_CHANNEL_ID ?? 'C0B59LQGJTY';
+
+/** How far back the Slack-history fallback looks for an existing post. */
+const HISTORY_LOOKBACK_DAYS = 30;
+
+/**
+ * TTL applies to the content-derived key only. The identity keys (GovDash id,
+ * solicitation number, notice id) are permanent - each names one specific
+ * record. The content key is a fuzzy match on title + NAICS + location, so it
+ * has to expire: a recurring annual requirement posted under the same title
+ * would otherwise be suppressed forever.
+ */
+const CONTENT_KEY_TTL_SECONDS = 120 * 24 * 60 * 60;
 
 async function kvCommand(command: string[]): Promise<unknown> {
   const path = command.map(encodeURIComponent).join('/');
@@ -70,39 +89,123 @@ async function kvCommand(command: string[]): Promise<unknown> {
   return data.result;
 }
 
-async function alreadyPosted(keys: string[]): Promise<boolean> {
-  if (!KV_URL || !KV_TOKEN || keys.length === 0) return false;
+/**
+ * `available: false` means the ledger could not be consulted at all - not
+ * configured, or unreachable. Callers must fall back to another check rather
+ * than reading `hit: false` as "definitely not posted yet". Conflating those
+ * two cases is what made the original fail-open silent.
+ */
+async function alreadyPosted(keys: string[]): Promise<{ hit: boolean; available: boolean }> {
+  if (!KV_CONFIGURED || keys.length === 0) return { hit: false, available: false };
   try {
     const result = await kvCommand(['exists', ...keys]);
-    return typeof result === 'number' && result > 0;
+    return { hit: typeof result === 'number' && result > 0, available: true };
   } catch (err) {
-    console.warn('KV dedup check failed - failing open (will post):', err);
-    return false;
+    console.error('KV dedup check failed - ledger unavailable:', err);
+    return { hit: false, available: false };
   }
 }
 
-async function markPosted(keys: string[], name: string): Promise<void> {
-  if (!KV_URL || !KV_TOKEN) return;
+async function markPosted(keys: string[], name: string, ttlKeys: Set<string>): Promise<void> {
+  if (!KV_CONFIGURED) return;
   for (const key of keys) {
     try {
-      await kvCommand(['set', key, name]);
+      await kvCommand(
+        ttlKeys.has(key)
+          ? ['set', key, name, 'EX', String(CONTENT_KEY_TTL_SECONDS)]
+          : ['set', key, name],
+      );
     } catch (err) {
       console.warn('KV mark-posted failed for', key, err);
     }
   }
 }
 
+/**
+ * Fuzzy identity for a requirement, stable across the churn that defeats all
+ * three identity keys at once: GovDash re-creating an opportunity under a fresh
+ * `opp_` id, SAM.gov re-issuing the 32-hex notice id on each amendment, and
+ * payloads that carry no solicitation number at all. When those rotate together
+ * every re-fire looks brand new, which is how one requirement ended up posted
+ * two dozen times.
+ *
+ * Deliberately excludes the due date - an amendment that moves the deadline is
+ * still the same requirement, and including it would let those through.
+ */
+function contentKey(
+  name: string | undefined,
+  naicsCode: string | undefined,
+  location: string | undefined,
+): string | null {
+  const title = name?.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!title) return null;
+  const basis = [title, naicsCode ?? '', location?.toLowerCase().trim() ?? ''].join('|');
+  const hash = crypto.createHash('sha256').update(basis).digest('hex').slice(0, 16);
+  return `pipeline:seen:content:${hash}`;
+}
+
 function buildDedupKeys(
   opportunityId: string | undefined,
   solicitationNumber: string | undefined,
   samUrl: string | undefined,
-): string[] {
+  name: string | undefined,
+  naicsCode: string | undefined,
+  location: string | undefined,
+): { keys: string[]; ttlKeys: Set<string> } {
   const noticeId = samUrl?.match(/\/opp\/([0-9a-f]{32})/i)?.[1];
-  return [
+  const content = contentKey(name, naicsCode, location);
+  const keys = [
     opportunityId ? `pipeline:seen:opp:${opportunityId}` : null,
     solicitationNumber ? `pipeline:seen:sol:${solicitationNumber.toUpperCase()}` : null,
     noticeId ? `pipeline:seen:notice:${noticeId.toLowerCase()}` : null,
+    content,
   ].filter((k): k is string => k !== null);
+  return { keys, ttlKeys: new Set(content ? [content] : []) };
+}
+
+/**
+ * Dedup fallback for when the KV ledger cannot be consulted: look for an
+ * existing `*Pipeline opportunity:* <name>` post in #pipeline. Strictly weaker
+ * than the ledger - a post deleted during cleanup is invisible here, and it
+ * costs Slack API calls - but it keeps duplicate suppression working when no KV
+ * store is attached, instead of degrading to no suppression at all.
+ *
+ * Needs the `channels:history` scope on SLACK_BOT_TOKEN. If that scope is
+ * missing the call fails loudly in the logs and we post rather than drop.
+ */
+async function postedInSlackHistory(name: string | undefined, token: string): Promise<boolean> {
+  if (!name) return false;
+  const needle = `*Pipeline opportunity:* ${name}`;
+  const oldest = Math.floor(Date.now() / 1000) - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60;
+  let cursor: string | undefined;
+
+  for (let page = 0; page < 5; page++) {
+    const url = new URL('https://slack.com/api/conversations.history');
+    url.searchParams.set('channel', PIPELINE_CHANNEL_ID);
+    url.searchParams.set('limit', '200');
+    url.searchParams.set('oldest', String(oldest));
+    if (cursor) url.searchParams.set('cursor', cursor);
+
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    const data = (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      messages?: { text?: string }[];
+      response_metadata?: { next_cursor?: string };
+    };
+
+    if (!data.ok) {
+      console.error('Slack history dedup unavailable:', data.error, '- cannot verify duplicates');
+      return false;
+    }
+    // Compare the first line exactly; a startsWith would let one title that is a
+    // prefix of another suppress the longer one.
+    if (data.messages?.some(m => m.text?.split('\n')[0] === needle)) return true;
+
+    cursor = data.response_metadata?.next_cursor || undefined;
+    if (!cursor) break;
+  }
+  return false;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -143,23 +246,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     const placeOfPerformance = data.placeOfPerformance as { city?: string; state?: string } | undefined;
     const samUrl = (data.source as { url?: string } | undefined)?.url;
 
-    // Skip anything already in the durable ledger, even if its Slack post was deleted.
-    const dedupKeys = buildDedupKeys(opportunityId, solicitationNumber, samUrl);
-    if (await alreadyPosted(dedupKeys)) {
-      console.log('Opportunity already posted to #pipeline (ledger hit), skipping:', name);
+    const slackToken = process.env.SLACK_BOT_TOKEN;
+
+    const location = placeOfPerformance
+      ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
+      : 'Unknown';
+
+    // Skip anything already posted, even if its Slack post was later deleted.
+    const { keys: dedupKeys, ttlKeys } = buildDedupKeys(
+      opportunityId,
+      solicitationNumber,
+      samUrl,
+      name,
+      naicsCode,
+      location,
+    );
+
+    const ledger = await alreadyPosted(dedupKeys);
+    let isDuplicate = ledger.hit;
+
+    if (!ledger.available) {
+      // Fail loud. A silent fail-open means every re-fire becomes a new post,
+      // which is how #pipeline filled up with repeats of the same requirement.
+      console.error(
+        KV_CONFIGURED
+          ? 'DEDUP DEGRADED: KV ledger unreachable - falling back to Slack history.'
+          : 'DEDUP DEGRADED: KV_REST_API_URL / KV_REST_API_TOKEN are not set, so the Vercel KV integration is not attached. Falling back to Slack history.',
+      );
+      if (slackToken) isDuplicate = await postedInSlackHistory(name, slackToken);
+    }
+
+    if (isDuplicate) {
+      console.log('Opportunity already posted to #pipeline, skipping:', name);
       res.status(200).json({ received: true, skipped: 'duplicate' });
       return;
     }
 
-    const slackToken = process.env.SLACK_BOT_TOKEN;
     if (slackToken) {
       const dueDateFormatted = dueDate
         ? new Date(dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' })
         : 'TBD';
-
-      const location = placeOfPerformance
-        ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
-        : 'Unknown';
 
       const message = [
         `*Pipeline opportunity:* ${name ?? 'Unnamed'}`,
@@ -186,12 +312,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       } else {
         console.log('Posted to #pipeline successfully');
         // Record in the ledger only after a successful post so a failed post can retry.
-        await markPosted(dedupKeys, name ?? 'Unnamed');
+        await markPosted(dedupKeys, name ?? 'Unnamed', ttlKeys);
       }
     } else {
       console.warn('SLACK_BOT_TOKEN not set — skipping #pipeline notification');
     }
   }
 
-  res.status(200).json({ received: true });
+  // `dedup` reports which mechanism is actually live, so a degraded ledger is
+  // visible from the Svix delivery log without digging through function logs.
+  res.status(200).json({ received: true, dedup: KV_CONFIGURED ? 'kv' : 'slack-history' });
 }
