@@ -17,6 +17,9 @@
     },
     "api/slack-delete.ts": {
       "maxDuration": 10
+    },
+    "api/slack-cleanup-kickoffs.ts": {
+      "maxDuration": 300
     }
   }
 }
