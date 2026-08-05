@@ -23,6 +23,10 @@
  *                "Cowork Kickoff Ready" reply.
  *                "olderThan": delete every bot opportunity thread whose PARENT
  *                post is older than `beforeDays` (whole thread, replies included).
+ *                "dedupeStage1": in any bot thread that has more than one
+ *                "Stage 1 - Showstopper Analysis" reply, delete the surplus
+ *                copies and keep only the earliest. Parent and all other replies
+ *                are left intact.
  *   sinceDays  - kickoffs mode only: scan back this many days (default 10).
  *   beforeDays - olderThan mode only: delete threads whose parent is older than
  *                this many days (default 7).
@@ -43,6 +47,7 @@
 
 const DEFAULT_PIPELINE_CHANNEL = process.env.PIPELINE_CHANNEL_ID ?? 'C0B59LQGJTY';
 const KICKOFF_MARKER = 'Cowork Kickoff Ready';
+const STAGE1_MARKER = 'Stage 1 - Showstopper Analysis';
 
 interface VercelRequest {
   method?: string;
@@ -90,7 +95,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const body = (req.body ?? {}) as Record<string, unknown>;
   const channel = (body.channel as string | undefined) ?? DEFAULT_PIPELINE_CHANNEL;
   const dryRun = body.dryRun === true;
-  const mode = body.mode === 'olderThan' ? 'olderThan' : 'kickoffs';
+  const mode = body.mode === 'olderThan' ? 'olderThan'
+    : body.mode === 'dedupeStage1' ? 'dedupeStage1'
+    : 'kickoffs';
   const sinceDays = typeof body.sinceDays === 'number' && body.sinceDays > 0 ? body.sinceDays : 10;
   const maxThreads = typeof body.maxThreads === 'number' && body.maxThreads > 0 ? body.maxThreads : 40;
 
@@ -168,13 +175,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         msgs = (replies.messages as SlackMessage[]) ?? [parent];
       }
 
+      const name = (parent.text ?? '').split('\n')[0].replace(/\*/g, '').slice(0, 120);
+
+      if (mode === 'dedupeStage1') {
+        // Find bot replies that are Stage 1 analyses; keep the earliest, delete
+        // the rest. Do NOT touch the parent or any non-Stage-1 replies.
+        const stage1 = msgs
+          .filter(m => m.user === botUserId && m.ts !== parent.ts && (m.text ?? '').includes(STAGE1_MARKER))
+          .sort((a, b) => Number(a.ts) - Number(b.ts));
+        if (stage1.length <= 1) continue;               // no duplicate
+        matched++;
+        if (toDelete.length >= maxThreads) continue;
+        const surplus = stage1.slice(1).map(m => m.ts); // everything after the first
+        toDelete.push({ name, parentTs: parent.ts, messageTs: surplus });
+        continue;
+      }
+
       if (mode === 'kickoffs' && !msgs.some(m => (m.text ?? '').includes(KICKOFF_MARKER))) continue;
 
       matched++;
       if (toDelete.length >= maxThreads) continue; // counted for `remaining`, deleted next call
 
       const ourTs = msgs.filter(m => m.user === botUserId).map(m => m.ts);
-      const name = (parent.text ?? '').split('\n')[0].replace(/\*/g, '').slice(0, 120);
       toDelete.push({ name, parentTs: parent.ts, messageTs: ourTs });
     }
     const remaining = Math.max(0, matched - toDelete.length);
