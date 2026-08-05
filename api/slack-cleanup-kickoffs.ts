@@ -16,14 +16,25 @@
  * Only messages authored by the bot are deleted; any stray human reply in a
  * matched thread is left untouched (chat.delete would reject it anyway).
  *
- * Body: { channel?: string, dryRun?: boolean, sinceDays?: number }
- *   channel   - channel ID (default: the #pipeline ID in PIPELINE_CHANNEL_ID
- *               env var, falling back to the hardcoded default below)
- *   dryRun    - if true, report what WOULD be deleted without deleting
- *   sinceDays - only scan messages newer than this many days (default 10).
- *               Kickoffs only appear on recently-posted opportunities, so this
- *               keeps the run inside the serverless time limit. Pass a larger
- *               number for a deeper sweep.
+ * Body: { channel?, dryRun?, mode?, sinceDays?, beforeDays?, maxThreads? }
+ *   channel    - channel ID (default: PIPELINE_CHANNEL_ID env var / hardcoded)
+ *   dryRun     - if true, report what WOULD be deleted without deleting
+ *   mode       - "kickoffs" (default): delete bot threads containing a
+ *                "Cowork Kickoff Ready" reply.
+ *                "olderThan": delete every bot opportunity thread whose PARENT
+ *                post is older than `beforeDays` (whole thread, replies included).
+ *   sinceDays  - kickoffs mode only: scan back this many days (default 10).
+ *   beforeDays - olderThan mode only: delete threads whose parent is older than
+ *                this many days (default 7).
+ *   maxThreads - cap threads deleted per call (default 40) to stay inside the
+ *                serverless time limit; re-invoke while `remaining` > 0.
+ *   beforeTs   - olderThan mode: explicit Unix-second cutoff (overrides
+ *                beforeDays). Use this to avoid any dependence on the server
+ *                clock - delete threads whose parent ts is < beforeTs.
+ *   oldestTs   - explicit Unix-second lower bound for the history scan
+ *                (overrides sinceDays). Pass 0 to scan the whole channel.
+ * In both modes, only bot-authored messages are deleted and human-posted
+ * parents are always skipped.
  * Auth: X-Runner-Secret header must match RUNNER_SECRET env var.
  *
  * Slack scopes required on the bot token: channels:history (read the channel),
@@ -79,8 +90,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const body = (req.body ?? {}) as Record<string, unknown>;
   const channel = (body.channel as string | undefined) ?? DEFAULT_PIPELINE_CHANNEL;
   const dryRun = body.dryRun === true;
+  const mode = body.mode === 'olderThan' ? 'olderThan' : 'kickoffs';
   const sinceDays = typeof body.sinceDays === 'number' && body.sinceDays > 0 ? body.sinceDays : 10;
-  const oldest = String(Math.floor(Date.now() / 1000) - sinceDays * 86400);
+  const maxThreads = typeof body.maxThreads === 'number' && body.maxThreads > 0 ? body.maxThreads : 40;
+
+  // kickoffs mode: only scan recent history (kickoffs are on recent posts).
+  // olderThan mode: scan everything and select parents older than the cutoff.
+  //
+  // Timestamps: prefer explicit Unix-second overrides (beforeTs / oldestTs) so
+  // the cutoff never depends on the server wall clock, which can differ from
+  // the channel's message timestamps. Fall back to day-offsets from Date.now()
+  // only when no explicit value is given.
+  const beforeDays = typeof body.beforeDays === 'number' && body.beforeDays > 0 ? body.beforeDays : 7;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoffTs = typeof body.beforeTs === 'number' && body.beforeTs > 0
+    ? body.beforeTs
+    : nowSec - beforeDays * 86400; // olderThan: delete threads whose parent ts is before this
+  const oldest = typeof body.oldestTs === 'number' && body.oldestTs >= 0
+    ? String(body.oldestTs)
+    : mode === 'kickoffs' ? String(nowSec - sinceDays * 86400) : '0';
 
   const authHeader = { Authorization: `Bearer ${token}` };
 
@@ -115,32 +143,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       if (cursor) await sleep(1200); // history is tier 3
     } while (cursor);
 
-    // 2. For each bot-authored parent that has replies, pull the thread and
-    //    check for the kickoff marker.
+    // 2. Select the bot-authored parent threads to delete, per mode.
+    //    kickoffs   -> thread contains a "Cowork Kickoff Ready" reply.
+    //    olderThan  -> parent post is older than the cutoff (whole thread goes).
+    // Cap at maxThreads per call so the run stays inside the time limit; the
+    // caller re-invokes until `remaining` is 0.
+    const candidates = parents.filter(p => p.user === botUserId);
     const toDelete: { name: string; parentTs: string; messageTs: string[] }[] = [];
-    for (const parent of parents) {
-      if (parent.user !== botUserId) continue;             // skip human-posted opportunities
-      if (!parent.reply_count || parent.reply_count < 1) continue;
+    let matched = 0;
+    for (const parent of candidates) {
+      if (mode === 'olderThan') {
+        if (Number(parent.ts) >= cutoffTs) continue; // newer than a week - keep
+      } else {
+        if (!parent.reply_count || parent.reply_count < 1) continue;
+      }
 
-      const replies = await slackGet('conversations.replies', { channel, ts: parent.ts, limit: '200' });
-      await sleep(1200); // replies is tier 3
-      if (!replies.ok) continue;
-      const msgs = (replies.messages as SlackMessage[]) ?? [];
+      // Gather this thread's messages (need replies for their ts, and for the
+      // kickoff-marker check). A 0-reply parent in olderThan mode is just itself.
+      let msgs: SlackMessage[] = [parent];
+      if (parent.reply_count && parent.reply_count > 0) {
+        const replies = await slackGet('conversations.replies', { channel, ts: parent.ts, limit: '200' });
+        await sleep(1200); // replies is tier 3
+        if (!replies.ok) continue;
+        msgs = (replies.messages as SlackMessage[]) ?? [parent];
+      }
 
-      const hasKickoff = msgs.some(m => (m.text ?? '').includes(KICKOFF_MARKER));
-      if (!hasKickoff) continue;
+      if (mode === 'kickoffs' && !msgs.some(m => (m.text ?? '').includes(KICKOFF_MARKER))) continue;
 
-      // Delete only the messages we (the bot) authored, parent included.
+      matched++;
+      if (toDelete.length >= maxThreads) continue; // counted for `remaining`, deleted next call
+
       const ourTs = msgs.filter(m => m.user === botUserId).map(m => m.ts);
       const name = (parent.text ?? '').split('\n')[0].replace(/\*/g, '').slice(0, 120);
       toDelete.push({ name, parentTs: parent.ts, messageTs: ourTs });
     }
+    const remaining = Math.max(0, matched - toDelete.length);
 
     if (dryRun) {
       res.status(200).json({
         dryRun: true,
+        mode,
         channel,
-        threadsMatched: toDelete.length,
+        threadsMatched: matched,
+        threadsThisRun: toDelete.length,
+        remaining,
         messagesToDelete: toDelete.reduce((n, t) => n + t.messageTs.length, 0),
         threads: toDelete.map(t => ({ name: t.name, parentTs: t.parentTs, replies: t.messageTs.length })),
       });
@@ -172,9 +218,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     res.status(200).json({
       ok: true,
+      mode,
       channel,
       threadsDeleted: toDelete.length,
       messagesDeleted: deleted,
+      remaining,
       failures,
       threads: toDelete.map(t => t.name),
     });
