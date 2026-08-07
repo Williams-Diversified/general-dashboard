@@ -144,19 +144,73 @@ function contentKey(
   return `pipeline:seen:content:${hash}`;
 }
 
+/** The 32-hex SAM.gov notice id embedded in a `/opp/<id>/view` URL. */
+function noticeIdFrom(samUrl: string | undefined): string | undefined {
+  return samUrl?.match(/\/opp\/([0-9a-f]{32})/i)?.[1]?.toLowerCase();
+}
+
+/** How long to wait on SAM before giving up and posting without the strong key. */
+const SAM_LOOKUP_TIMEOUT_MS = 4000;
+
+/**
+ * Resolve a solicitation number from a SAM.gov notice id.
+ *
+ * GovDash omits `solicitationNumber` on most payloads, which silently drops the
+ * strongest dedup key and leaves only keys that rotate: GovDash re-creates
+ * opportunities under fresh `opp_` ids, and SAM re-issues the notice id on every
+ * amendment. The content key covers some of that, but it breaks whenever the CO
+ * retitles a notice - the same Turner requirement (47PD5526R0042) posted as both
+ * "Turner Roof and Building Envelope Project" and "MT0055AW ... Turner LPOE -
+ * Amendment 0001". SAM knows the solicitation number for a notice id, so look it
+ * up here and dedup on the one identifier that survives all of that churn.
+ *
+ * Strictly best-effort. This endpoint 404s for pulled or superseded notices and
+ * has intermittently returned 401, so every failure path returns undefined and
+ * dedup carries on with the remaining keys. It must never block or delay a real
+ * opportunity reaching #pipeline.
+ */
+async function resolveSolicitationNumber(noticeId: string): Promise<string | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SAM_LOOKUP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://sam.gov/api/prod/opps/v2/opportunities/${noticeId}`, {
+      headers: { Accept: 'application/hal+json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      // 404 means the notice was pulled or superseded, 401 means the endpoint is
+      // gated again. Both are expected states rather than defects.
+      console.log(`SAM lookup for ${noticeId} returned ${res.status} - no solicitation number`);
+      return undefined;
+    }
+    // The record nests under `data2`, not `data`.
+    const body = (await res.json()) as { data2?: { solicitationNumber?: string } };
+    return body.data2?.solicitationNumber?.trim() || undefined;
+  } catch (err) {
+    console.warn('SAM solicitation lookup failed for', noticeId, err);
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function buildDedupKeys(
   opportunityId: string | undefined,
   solicitationNumber: string | undefined,
-  samUrl: string | undefined,
+  noticeId: string | undefined,
   name: string | undefined,
   naicsCode: string | undefined,
   location: string | undefined,
 ): { keys: string[]; ttlKeys: Set<string> } {
-  const noticeId = samUrl?.match(/\/opp\/([0-9a-f]{32})/i)?.[1];
   const content = contentKey(name, naicsCode, location);
   const keys = [
     opportunityId ? `pipeline:seen:opp:${opportunityId}` : null,
-    solicitationNumber ? `pipeline:seen:sol:${solicitationNumber.toUpperCase()}` : null,
+    // Matched exactly, including any trailing amendment letter. A reopened
+    // solicitation gets a letter suffix and a new notice id while the original
+    // goes inactive (697DCK-26-R-00315 -> 697DCK-26-R-00315a), and the feed has
+    // posted the dead one before the live one. Collapsing the suffix would
+    // suppress the live reopening as a duplicate of a closed notice.
+    solicitationNumber ? `pipeline:seen:sol:${solicitationNumber.trim().toUpperCase()}` : null,
     noticeId ? `pipeline:seen:notice:${noticeId.toLowerCase()}` : null,
     content,
   ].filter((k): k is string => k !== null);
@@ -237,8 +291,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   // id and phase, while new opportunity payloads include all fields.
   const isNewOpportunity = opportunityId?.startsWith('opp_') && typeof data.name === 'string';
 
+  // Reported in the response so the Svix delivery log shows whether the strong
+  // key was available for this delivery.
+  let solicitationSource: 'payload' | 'sam' | 'none' = 'none';
+
   if (isNewOpportunity) {
-    const solicitationNumber = data.solicitationNumber as string | undefined;
+    let solicitationNumber = (data.solicitationNumber as string | undefined)?.trim() || undefined;
     const name = data.name as string | undefined;
     const naicsCode = data.naicsCode as string | undefined;
     const dueDate = data.dueDate as string | undefined;
@@ -252,11 +310,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
       : 'Unknown';
 
+    // Fill in the solicitation number from SAM before the ledger is consulted,
+    // so the key that survives amendments and retitles is actually present.
+    const noticeId = noticeIdFrom(samUrl);
+    if (solicitationNumber) {
+      solicitationSource = 'payload';
+    } else if (noticeId) {
+      const resolved = await resolveSolicitationNumber(noticeId);
+      if (resolved) {
+        solicitationNumber = resolved;
+        solicitationSource = 'sam';
+        console.log(`Resolved solicitation ${resolved} from SAM notice ${noticeId}`);
+      }
+    }
+
     // Skip anything already posted, even if its Slack post was later deleted.
     const { keys: dedupKeys, ttlKeys } = buildDedupKeys(
       opportunityId,
       solicitationNumber,
-      samUrl,
+      noticeId,
       name,
       naicsCode,
       location,
@@ -321,5 +393,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   // `dedup` reports which mechanism is actually live, so a degraded ledger is
   // visible from the Svix delivery log without digging through function logs.
-  res.status(200).json({ received: true, dedup: KV_CONFIGURED ? 'kv' : 'slack-history' });
+  res.status(200).json({
+    received: true,
+    dedup: KV_CONFIGURED ? 'kv' : 'slack-history',
+    solicitation: solicitationSource,
+  });
 }
