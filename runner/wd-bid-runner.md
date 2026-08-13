@@ -33,6 +33,14 @@ When building a long `text` value in PowerShell, do not pipe `Get-Content -Raw` 
 
 Use the Slack MCP only for READING messages and reactions — never for posting.
 
+**Character rules (apply to every post):**
+- Never use em dashes (—) or en dashes (–). Use a plain hyphen (-) instead.
+- Never paste raw Unicode emoji. Use Slack colon-syntax only:
+  - :white_check_mark: :x: :warning: :stopwatch:
+  - :large_green_circle: for BID, :red_circle: for NO-BID, :large_yellow_circle: for BID-WITH-CONDITIONS
+  - :rocket: for Cowork kickoff
+- Never use curly quotes or ellipsis character (…). Use straight quotes and three plain periods (...).
+
 ## How to delete a bot post (manual only)
 
 This is never run automatically as part of Pass 1 or Pass 2 - only when the user explicitly asks to delete a specific message (e.g. cleaning up a test post). The bot can only delete messages it posted itself.
@@ -50,14 +58,6 @@ Body:
 
 Confirm the channel and `ts` with the user before calling this - deletion is irreversible.
 
-**Character rules:**
-- Never use em dashes (—) or en dashes (–). Use a plain hyphen (-) instead.
-- Never paste raw Unicode emoji. Use Slack colon-syntax only:
-  - :white_check_mark: :x: :warning: :file_folder: :memo: :hammer_and_wrench: :stopwatch:
-  - :large_green_circle: for BID, :red_circle: for NO-BID, :large_yellow_circle: for BID-WITH-CONDITIONS
-  - :rocket: for Cowork kickoff, :lock: for PIEE
-- Never use curly quotes or ellipsis character (…). Use straight quotes and three plain periods (...).
-
 ---
 
 ## How to determine the state of each opportunity
@@ -69,16 +69,70 @@ For every Claude WD opportunity post in #pipeline, check the following to decide
 | 0 | No | PASS 1 - run Stage 1 showstopper |
 | 1 | No | Skip - Stage 1 done, waiting for ✅ |
 | 1 | Yes | PASS 2 - run Cowork kickoff |
-| 2+ | Yes | Skip - already fully processed |
-| 2+ | No | Skip - already fully processed |
+| 2+ | Yes | Skip - already fully processed (Stage 1 + Cowork kickoff, which now spans several replies) |
+| 2+ | No | Skip this run - but 2+ replies with NO reaction is not a normal state: it usually means a duplicate Stage 1 was posted. Do not re-run Stage 1; flag it for dedupe. |
 
-**Skip any opportunity with 2 or more replies in its thread — it has already been through both stages.**
+**Skip any opportunity with 2 or more replies in its thread for the purpose of Pass 1/Pass 2 - it has already been through the stage the runner would otherwise post. (A reacted thread is fully processed; an unreacted 2+ thread is a duplicate-Stage-1 artifact, not new work.)**
+
+### How to enumerate the channel - do not skip this
+
+A human can react to ANY post at any time, including one from weeks ago. Post age has no
+relationship to Pass 2 eligibility, so a recency-bounded scan is structurally wrong and its failure
+looks exactly like "nothing to do." This mistake has now been made twice (2026-08-07 and 2026-08-10) -
+each time by reading a bounded window, spot-checking a few messages for reactions, finding none, and
+reporting "no reactions anywhere in the channel."
+
+**Never conclude "Pass 2 has no work" from a bounded `slack_read_channel limit:N` read.** That call
+returns the newest N messages only; `limit:40` reaches back roughly a day and a half on this channel.
+
+**For Pass 2, find reacted posts with ONE search instead of paginating:**
+
+```
+slack_search_public_and_private
+  query: "in:#pipeline has::white_check_mark: Pipeline opportunity"
+  include_bots: true      <- REQUIRED; posts are from a bot and are omitted without it
+  sort: "timestamp"
+  limit: 20
+  include_context: false
+```
+
+This returns every check-marked post regardless of age in a single call. The results carry
+`Reply count:` per message, which is the other half of the state table - so read the verdict straight
+off the search output: **reply count exactly 1 = Pass 2 work; 2 or more = already processed, skip.**
+Results also include Stage 1 replies that happen to match; ignore any result whose text is not a
+`*Pipeline opportunity:*` parent post.
+
+**`limit: 20` is the maximum this tool accepts, so the search itself can truncate once the channel
+holds more than 20 check-marked posts** - the same silent-truncation failure this section exists to
+prevent. If the result count comes back at exactly 20, page it with the returned `cursor` until the
+results are exhausted. As of 2026-08-10 there were 13, so one call sufficed; do not assume that holds.
+
+**For Pass 1**, page `slack_read_channel` back with the returned `cursor` until every remaining post
+is clearly older than the newest already-processed post. Do not rely on reactions appearing in
+`slack_read_channel` output even in `detailed` mode - confirm reaction state with the search above or
+with `slack_get_reactions` on the specific message.
 
 ---
 
 ## PASS 1 - Stage 1 Showstopper (new opportunities)
 
-Read #pipeline. Find posts that contain a SAM.gov URL and have 0 replies in their thread.
+Read #pipeline, paginating as described above. Find posts that have 0 replies in their thread.
+
+**A missing SAM.gov URL is not a reason to skip a post.** Some pipeline posts arrive with no URL, no
+NAICS, no solicitation number, Location "Unknown" and Due "TBD". Treated as out of scope, these sit
+unanalyzed forever, because nothing ever adds a reply to them. That cost WD a live 13-day runway on
+`W50S6N-26-Q-A021` (Exit Gate Modification, 187th Fighter Wing), a small business set-aside in a core
+NAICS that posted 2026-07-29, sat 0-reply since 2026-08-04, and was only looked at on 2026-08-12 after
+it had closed and been cancelled. Resolve the notice from the title with ONE search-index call:
+
+```
+curl -H "Accept: application/hal+json" \
+  "https://sam.gov/api/prod/sgs/v1/search/?index=opp&q=<TITLE+WORDS>&qMode=ALL&page=0&size=10&mode=search"
+```
+
+That returns `_id` (the notice id), `solicitationNumber`, `isActive`, `isCanceled` and
+`responseDateActual`, which is enough to run Stage 1 properly. `&qMode=ALL` is mandatory - without it
+the filter is silently ignored and the entire corpus comes back.
 
 Opportunity posts use this format:
 ```
@@ -124,7 +178,7 @@ Use :x: for failed checks, :large_yellow_circle: for BID-WITH-CONDITIONS, :red_c
 
 ## PASS 2 - Cowork Kickoff (reacted opportunities)
 
-Find original opportunity posts in #pipeline that have exactly 1 reply in their thread AND a :white_check_mark: reaction on the original post.
+Find original opportunity posts in #pipeline that have exactly 1 reply in their thread AND a :white_check_mark: reaction on the original post. **Use the reaction search in "How to enumerate the channel" above to find them - a bounded channel read will silently miss reacted posts older than its window, which has already caused a due-tomorrow kickoff to be missed.** Reacted posts are usually days or weeks old, because the reaction comes after a human has read Stage 1 - so the Pass 2 targets are precisely the ones a recent-window read cannot see.
 
 For each:
 
@@ -133,6 +187,7 @@ b. Read the thread. If any reply already contains the text "Cowork Kickoff Ready
 c. Extract from the post: title (bold line), solicitation number, NAICS, set-aside, location, due date, SAM.gov URL, and the Stage 1 verdict and any conditions from the thread.
 d. If the solicitation number cannot be found in the post or thread, open the SAM.gov URL from the original post and retrieve the solicitation number and notice ID directly from the SAM.gov opportunity page. Use whichever is available to populate the Cowork project name and local folder name.
 e. Check SAM.gov URL for `piee.eb.mil` references - set PIEE flag if found.
+f. **Re-verify the due date and period structure against SAM.gov, and do not trust the pipeline post.** The `Due:` line in the post comes from a structured field that is frequently stale or off by a day, and the Stage 1 verdict may have been written weeks earlier against a runway that no longer exists. Pull the live record and confirm the actual response deadline, whether the notice is still active or has been archived, and whether the RFQ carries option years. Get the live record one of two ways: the general-dashboard endpoint `https://general-dashboard-iota.vercel.app/api/sam-docs?noticeId=<NOTICE_ID>` (returns title, solicitationNumber, setAside, responseDeadLine, location), or, if you only have the title, the SAM.gov hal+json search-index call shown in Pass 1 (which returns `_id`, `isActive`, `isCanceled`, and `responseDateActual`). If the real deadline is sooner than the post shows, put a dated correction at the top of the kickoff header. If Stage 1 called the timeline "comfortable" but under 3 days now remain, say so plainly - the human is deciding whether to commit a day of work.
 
 ### Post Cowork kickoff reply
 
