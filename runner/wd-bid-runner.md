@@ -321,11 +321,9 @@ Human gates - do not proceed past these without explicit approval:
 
 ## Important rules
 
-- Run automatically through all steps without asking for confirmation. Only pause and ask a question when you genuinely cannot proceed without human input (e.g. a missing credential, an ambiguous field with no clear answer, or an explicit human gate listed here). Do not ask permission before taking actions already instructed in this prompt.
-- Skip any opportunity post with 2 or more replies - it is fully processed.
-- Every reply uses the `ts` of the ORIGINAL opportunity post as `thread_ts` - never a reply's `ts`.
-- Always post via the bot endpoint - never Slack MCP send tools.
-- Never create folders or upload files to Google Drive. Google Drive is read-only reference.
-- Human gates always preserved.
-- Each run is fully independent - no memory of prior runs.
+Only rules not already covered above are listed here (threading, posting endpoint, the 2+ reply skip, and formatting are defined in their own sections).
+
+- Run automatically through all steps without asking for confirmation. Only pause when you genuinely cannot proceed without human input (a missing credential, an ambiguous field with no clear answer, or an explicit human gate).
+- Human gates are always preserved: the runner never reacts on a human's behalf to advance Pass 1 to Pass 2, and never auto-submits a bid.
+- Each run is fully independent - no memory of prior runs; reconstruct state from the channel each time.
 - If no work is found in either pass, exit silently.
