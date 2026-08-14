@@ -149,27 +149,54 @@ function noticeIdFrom(samUrl: string | undefined): string | undefined {
   return samUrl?.match(/\/opp\/([0-9a-f]{32})/i)?.[1]?.toLowerCase();
 }
 
-/** How long to wait on SAM before giving up and posting without the strong key. */
+/** How long to wait on SAM before giving up and posting without its answer. */
 const SAM_LOOKUP_TIMEOUT_MS = 4000;
 
 /**
- * Resolve a solicitation number from a SAM.gov notice id.
- *
- * GovDash omits `solicitationNumber` on most payloads, which silently drops the
- * strongest dedup key and leaves only keys that rotate: GovDash re-creates
- * opportunities under fresh `opp_` ids, and SAM re-issues the notice id on every
- * amendment. The content key covers some of that, but it breaks whenever the CO
- * retitles a notice - the same Turner requirement (47PD5526R0042) posted as both
- * "Turner Roof and Building Envelope Project" and "MT0055AW ... Turner LPOE -
- * Amendment 0001". SAM knows the solicitation number for a notice id, so look it
- * up here and dedup on the one identifier that survives all of that churn.
- *
- * Strictly best-effort. This endpoint 404s for pulled or superseded notices and
- * has intermittently returned 401, so every failure path returns undefined and
- * dedup carries on with the remaining keys. It must never block or delay a real
- * opportunity reaching #pipeline.
+ * Grace period before a passed deadline counts as closed. Absorbs clock skew and
+ * date-only feed values so an opportunity closing today is never mistaken for
+ * one that closed already.
  */
-async function resolveSolicitationNumber(noticeId: string): Promise<string | undefined> {
+const CLOSED_GRACE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What SAM.gov knows about a notice id.
+ *
+ * `missing` (404) and `unavailable` (timeout, 401, unparseable body) are kept
+ * apart deliberately. A 404 is a real statement about the notice; the others
+ * tell us nothing and must never be read as evidence against an opportunity.
+ */
+type NoticeLookup =
+  | {
+      status: 'ok';
+      solicitationNumber?: string;
+      responseDeadline?: string;
+      archived: boolean;
+      cancelled: boolean;
+    }
+  | { status: 'missing' }
+  | { status: 'unavailable' };
+
+/**
+ * Ask SAM.gov about a notice id. Two jobs.
+ *
+ * First, the solicitation number. GovDash omits it on most payloads, which
+ * silently drops the strongest dedup key and leaves only keys that rotate:
+ * GovDash re-creates opportunities under fresh `opp_` ids, and SAM re-issues the
+ * notice id on every amendment. The content key covers some of that, but it
+ * breaks whenever a CO retitles a notice - the same Turner requirement
+ * (47PD5526R0042) posted as both "Turner Roof and Building Envelope Project" and
+ * "MT0055AW ... Turner LPOE - Amendment 0001".
+ *
+ * Second, liveness. The feed republishes notices whose response date has long
+ * passed - AMXG Group Air Compressors kept arriving for over a week after quotes
+ * closed on 2026-08-05 - and SAM's own deadline is the authority on that,
+ * because the feed's `dueDate` is routinely stale in both directions.
+ *
+ * Strictly best-effort. Every failure path reports `unavailable` so the
+ * opportunity still reaches #pipeline. It must never block or delay real work.
+ */
+async function lookupNotice(noticeId: string): Promise<NoticeLookup> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SAM_LOOKUP_TIMEOUT_MS);
   try {
@@ -177,21 +204,74 @@ async function resolveSolicitationNumber(noticeId: string): Promise<string | und
       headers: { Accept: 'application/hal+json' },
       signal: controller.signal,
     });
-    if (!res.ok) {
-      // 404 means the notice was pulled or superseded, 401 means the endpoint is
-      // gated again. Both are expected states rather than defects.
-      console.log(`SAM lookup for ${noticeId} returned ${res.status} - no solicitation number`);
-      return undefined;
+    if (res.status === 404) {
+      // The notice is not on SAM at all - pulled, superseded, or never public.
+      console.log(`SAM lookup for ${noticeId} returned 404 - notice not on SAM.gov`);
+      return { status: 'missing' };
     }
-    // The record nests under `data2`, not `data`.
-    const body = (await res.json()) as { data2?: { solicitationNumber?: string } };
-    return body.data2?.solicitationNumber?.trim() || undefined;
+    if (!res.ok) {
+      // 401 has shown up intermittently when the endpoint is gated again.
+      console.log(`SAM lookup for ${noticeId} returned ${res.status} - treating as unavailable`);
+      return { status: 'unavailable' };
+    }
+    // The solicitation record nests under `data2`; the lifecycle flags sit at the
+    // top level beside it, not inside it.
+    const body = (await res.json()) as {
+      data2?: {
+        solicitationNumber?: string;
+        solicitation?: { deadlines?: { response?: string } };
+      };
+      archived?: boolean;
+      cancelled?: boolean;
+    };
+    return {
+      status: 'ok',
+      solicitationNumber: body.data2?.solicitationNumber?.trim() || undefined,
+      responseDeadline: body.data2?.solicitation?.deadlines?.response || undefined,
+      archived: body.archived === true,
+      cancelled: body.cancelled === true,
+    };
   } catch (err) {
-    console.warn('SAM solicitation lookup failed for', noticeId, err);
-    return undefined;
+    console.warn('SAM lookup failed for', noticeId, err);
+    return { status: 'unavailable' };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function hasPassed(iso: string | undefined): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && t < Date.now() - CLOSED_GRACE_MS;
+}
+
+/**
+ * Why this opportunity can no longer be bid, or null if it still can be.
+ *
+ * Distinct from dedup: the ledger stops the same opportunity being posted twice,
+ * this stops one nobody can act on being posted at all. The AMXG flood was the
+ * second kind - it arrived under a fresh notice id every time, so no ledger key
+ * would have matched it anyway.
+ *
+ * SAM is the authority whenever it answers. The feed's own `dueDate` is only
+ * consulted to corroborate a 404, because it is stale in both directions: it has
+ * read a day early on live notices, so gating on it alone would drop real work.
+ * Requiring both signals to agree means that even an outage turning every lookup
+ * into a 404 still cannot suppress a live-dated opportunity.
+ */
+function closedReason(lookup: NoticeLookup, payloadDueDate: string | undefined): string | null {
+  if (lookup.status === 'ok') {
+    if (lookup.cancelled) return 'cancelled on SAM.gov';
+    if (lookup.archived) return 'archived on SAM.gov';
+    if (hasPassed(lookup.responseDeadline)) {
+      return `response deadline ${lookup.responseDeadline} has passed`;
+    }
+    return null;
+  }
+  if (lookup.status === 'missing' && hasPassed(payloadDueDate)) {
+    return `notice is not on SAM.gov and the feed due date ${payloadDueDate} has passed`;
+  }
+  return null;
 }
 
 function buildDedupKeys(
@@ -292,8 +372,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const isNewOpportunity = opportunityId?.startsWith('opp_') && typeof data.name === 'string';
 
   // Reported in the response so the Svix delivery log shows whether the strong
-  // key was available for this delivery.
+  // key was available for this delivery, and whether SAM could be reached to
+  // judge liveness at all.
   let solicitationSource: 'payload' | 'sam' | 'none' = 'none';
+  let noticeStatus: NoticeLookup['status'] | 'no-url' = 'no-url';
 
   if (isNewOpportunity) {
     let solicitationNumber = (data.solicitationNumber as string | undefined)?.trim() || undefined;
@@ -310,18 +392,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ? `${placeOfPerformance.city ?? ''}, ${placeOfPerformance.state ?? ''}`.trim().replace(/^,\s*/, '')
       : 'Unknown';
 
+    // One SAM lookup now serves both the dedup key and the liveness gate, so it
+    // runs even when the payload already carries a solicitation number.
+    const noticeId = noticeIdFrom(samUrl);
+    const lookup: NoticeLookup = noticeId ? await lookupNotice(noticeId) : { status: 'unavailable' };
+    if (noticeId) noticeStatus = lookup.status;
+
     // Fill in the solicitation number from SAM before the ledger is consulted,
     // so the key that survives amendments and retitles is actually present.
-    const noticeId = noticeIdFrom(samUrl);
     if (solicitationNumber) {
       solicitationSource = 'payload';
-    } else if (noticeId) {
-      const resolved = await resolveSolicitationNumber(noticeId);
-      if (resolved) {
-        solicitationNumber = resolved;
-        solicitationSource = 'sam';
-        console.log(`Resolved solicitation ${resolved} from SAM notice ${noticeId}`);
-      }
+    } else if (lookup.status === 'ok' && lookup.solicitationNumber) {
+      solicitationNumber = lookup.solicitationNumber;
+      solicitationSource = 'sam';
+      console.log(`Resolved solicitation ${solicitationNumber} from SAM notice ${noticeId}`);
+    }
+
+    // Drop opportunities whose window has already closed. Nothing downstream can
+    // act on one: the runner's Stage 1 can only ever return NO-BID, and the feed
+    // re-sends it indefinitely under rotating notice ids, so each repost costs a
+    // fresh showstopper analysis for an opportunity nobody can bid.
+    const closed = closedReason(lookup, dueDate);
+    if (closed) {
+      console.log(`Opportunity closed (${closed}), not posting to #pipeline:`, name);
+      res.status(200).json({ received: true, skipped: 'closed', reason: closed });
+      return;
     }
 
     // Skip anything already posted, even if its Slack post was later deleted.
@@ -355,8 +450,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     if (slackToken) {
-      const dueDateFormatted = dueDate
-        ? new Date(dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' })
+      // SAM's deadline wins when we have it. The feed's dueDate has been seen
+      // both a day early on live notices and a week stale on closed ones, and a
+      // wrong date here becomes a wrong Stage 1 timeline verdict downstream.
+      const effectiveDueDate =
+        (lookup.status === 'ok' ? lookup.responseDeadline : undefined) ?? dueDate;
+      const dueDateFormatted = effectiveDueDate
+        ? new Date(effectiveDueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Chicago' })
         : 'TBD';
 
       const message = [
@@ -397,5 +497,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     received: true,
     dedup: KV_CONFIGURED ? 'kv' : 'slack-history',
     solicitation: solicitationSource,
+    notice: noticeStatus,
   });
 }
