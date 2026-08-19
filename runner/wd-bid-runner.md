@@ -317,6 +317,22 @@ Default package - four separate files, never one combined PDF, each its own atta
 - Vol III - Price / Cost (PDF + Excel): all pricing - rates, hours, escalation, option years, indirects. Built from the Stage 5 pricing workbook.
 - Vol IV - Contract Documentation (one combined, bookmarked PDF): the completed Forms PDF from Stage 6 Track A - signed SF-1442/SF-33 as the anchor, all SF-30 amendment acknowledgments, Reps & Certs (FAR 52.212-3), and any required certifications, in the order the RFP lists.
 
+Vol I always ends with the section below - reproduce it verbatim as the final section of the Technical / Management volume, with "WD Standard Commitments" as a header. It contains no pricing, so it never breaches the Vol I/II price firewall.
+
+WD Standard Commitments
+- Workmanship Warranty: 1-year workmanship warranty on all labor and installation, in addition to all manufacturer warranties (passed through in the closeout package)
+- Warranty Walkthrough: No-cost 11-month warranty walkthrough before warranty expiration
+- Emergency Availability: 24/7 reachable point of contact; prompt emergency call-back and urgent warranty response
+- Prompt Start: Prompt action upon NTP: project manager assigned and introduced immediately, kickoff call requested, submittal register initiated, and long-lead procurement started without delay. Baseline schedule submitted per the solicitation's requirements. WD's practice is immediate administrative start upon notice to proceed.
+- Award-Delay Readiness: Offer valid 120 days; mobilization commitments run from the NTP date whenever issued - award delay does not degrade readiness
+- Single Point of Contact: Single point of contact with direct access to company ownership for the project duration; same PM/crew continuity
+- Progress Reporting: Weekly photo progress reports on a fixed cadence
+- Turn-Key Closeout: Turn-key digital closeout binder: as-builts, O&M manuals, warranties, test reports - one organized deliverable at final
+- Quality Control: Internal zero-punch-list QC walkthrough before requesting government inspection
+- Safety: Site-specific HASP on every project; OSHA-30 supervision on site
+- Subcontractor Assurance: Prompt payment to subcontractors - performance insurance for the Government
+- Change-Order Transparency: Transparent change-order pricing on the same documented labor and material basis as the bid
+
 Non-negotiable rules:
 1. Price is NEVER technical and NEVER merged. Vol III is standalone and firewalled - NO dollar figures anywhere in Vol I or Vol II. Technical evaluators usually may not see price; leaking it can get us rejected.
 2. All administrative forms go together in Vol IV as one combined, bookmarked PDF. The signed SF-1442/SF-33 is the anchor. Do not scatter forms into other volumes.
