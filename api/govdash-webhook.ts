@@ -64,12 +64,6 @@ const KV_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL
 const KV_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
 const KV_CONFIGURED = Boolean(KV_URL && KV_TOKEN);
 
-/** #pipeline channel id, used by the Slack-history dedup fallback. */
-const PIPELINE_CHANNEL_ID = process.env.PIPELINE_CHANNEL_ID ?? 'C0B59LQGJTY';
-
-/** How far back the Slack-history fallback looks for an existing post. */
-const HISTORY_LOOKBACK_DAYS = 30;
-
 /**
  * TTL applies to the content-derived key only. The identity keys (GovDash id,
  * solicitation number, notice id) are permanent - each names one specific
@@ -297,51 +291,6 @@ function buildDedupKeys(
   return { keys, ttlKeys: new Set(content ? [content] : []) };
 }
 
-/**
- * Dedup fallback for when the KV ledger cannot be consulted: look for an
- * existing `*Pipeline opportunity:* <name>` post in #pipeline. Strictly weaker
- * than the ledger - a post deleted during cleanup is invisible here, and it
- * costs Slack API calls - but it keeps duplicate suppression working when no KV
- * store is attached, instead of degrading to no suppression at all.
- *
- * Needs the `channels:history` scope on SLACK_BOT_TOKEN. If that scope is
- * missing the call fails loudly in the logs and we post rather than drop.
- */
-async function postedInSlackHistory(name: string | undefined, token: string): Promise<boolean> {
-  if (!name) return false;
-  const needle = `*Pipeline opportunity:* ${name}`;
-  const oldest = Math.floor(Date.now() / 1000) - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60;
-  let cursor: string | undefined;
-
-  for (let page = 0; page < 5; page++) {
-    const url = new URL('https://slack.com/api/conversations.history');
-    url.searchParams.set('channel', PIPELINE_CHANNEL_ID);
-    url.searchParams.set('limit', '200');
-    url.searchParams.set('oldest', String(oldest));
-    if (cursor) url.searchParams.set('cursor', cursor);
-
-    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
-    const data = (await res.json()) as {
-      ok: boolean;
-      error?: string;
-      messages?: { text?: string }[];
-      response_metadata?: { next_cursor?: string };
-    };
-
-    if (!data.ok) {
-      console.error('Slack history dedup unavailable:', data.error, '- cannot verify duplicates');
-      return false;
-    }
-    // Compare the first line exactly; a startsWith would let one title that is a
-    // prefix of another suppress the longer one.
-    if (data.messages?.some(m => m.text?.split('\n')[0] === needle)) return true;
-
-    cursor = data.response_metadata?.next_cursor || undefined;
-    if (!cursor) break;
-  }
-  return false;
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -430,17 +379,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     );
 
     const ledger = await alreadyPosted(dedupKeys);
-    let isDuplicate = ledger.hit;
+    const isDuplicate = ledger.hit;
 
     if (!ledger.available) {
-      // Fail loud. A silent fail-open means every re-fire becomes a new post,
-      // which is how #pipeline filled up with repeats of the same requirement.
+      // Fail loud, then post. Duplicate suppression depends entirely on the KV
+      // ledger; without it there is no fallback, so we log and post rather than
+      // drop. A silent fail-open is how #pipeline filled up with repeats before,
+      // so this stays a logged, visible degradation.
       console.error(
         KV_CONFIGURED
-          ? 'DEDUP DEGRADED: KV ledger unreachable - falling back to Slack history.'
-          : 'DEDUP DEGRADED: KV_REST_API_URL / KV_REST_API_TOKEN are not set, so the Vercel KV integration is not attached. Falling back to Slack history.',
+          ? 'DEDUP DEGRADED: KV ledger unreachable - posting without duplicate suppression.'
+          : 'DEDUP DEGRADED: KV_REST_API_URL / KV_REST_API_TOKEN are not set, so the Vercel KV integration is not attached. Posting without duplicate suppression.',
       );
-      if (slackToken) isDuplicate = await postedInSlackHistory(name, slackToken);
     }
 
     if (isDuplicate) {
