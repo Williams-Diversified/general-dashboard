@@ -347,7 +347,14 @@ Vol III Excel rule:
 - Portal direct-entry -> enter pricing into the portal fields; a file upload may not be needed.
 Never substitute our own Excel for a required government template, and never flatten formulas to values unless told to lock the file.
 
-Title pages: add to Vol I and Vol II (and Vol III if it is a PDF; a light cover for Vol IV). Include company name, UEI (NVKEHRT5P2P3), CAGE (0QRJ4), solicitation number/title, agency, date, and POC.
+Deliverable is FOUR separate files - one per volume, each its own attachment. Never merge them into a single combined PDF (except within Vol IV, which is itself one combined forms PDF). Produce and save each volume as its own file in the Final Submission folder.
+
+Cover page: every volume gets its own cover page. The title line on each cover reads "Volume [N] - [Volume Name] - [Proposal Name]", using the opportunity name as the proposal name. Use these exact volume names:
+- Volume 1 - Technical Proposal - [Proposal Name]
+- Volume 2 - Past Performance - [Proposal Name]
+- Volume 3 - Price Proposal - [Proposal Name]
+- Volume 4 - Contract Documentation - [Proposal Name]
+Under the title line, include: company name (Williams Diversified LLC), UEI (NVKEHRT5P2P3), CAGE (0QRJ4), solicitation number, agency, date, and POC. (Vol IV gets a light cover; the signed SF-1442/SF-33 remains its first substantive page.)
 
 Before handing off, run the pre-submission check and report results to the user:
 - File count matches the RFP (default 4, confirm - could be more or fewer); submission method and destination confirmed; due date/time AND time zone confirmed.
