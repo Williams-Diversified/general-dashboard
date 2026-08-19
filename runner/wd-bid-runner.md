@@ -107,10 +107,25 @@ holds more than 20 check-marked posts** - the same silent-truncation failure thi
 prevent. If the result count comes back at exactly 20, page it with the returned `cursor` until the
 results are exhausted. As of 2026-08-10 there were 13, so one call sufficed; do not assume that holds.
 
-**For Pass 1**, page `slack_read_channel` back with the returned `cursor` until every remaining post
-is clearly older than the newest already-processed post. Do not rely on reactions appearing in
+**For Pass 1**, page `slack_read_channel` back with the returned `cursor` **until you have covered at
+least four full weeks of posts** - roughly 4 pages at `limit:60`. Do not rely on reactions appearing in
 `slack_read_channel` output even in `detailed` mode - confirm reaction state with the search above or
 with `slack_get_reactions` on the specific message.
+
+**Do NOT stop paging because the newest page is fully processed - that is not evidence of anything.**
+The old stop condition here ("page back until every remaining post is clearly older than the newest
+already-processed post") was structurally broken: it is satisfied on page 1 whenever the recent posts
+all have replies, which is the normal state. A 0-reply post is invisible to that test because nothing
+ever adds a reply to it, so it never ages out and never gets closer to the top. On 2026-08-14 pages 1
+and 2 were 100% processed while **two 0-reply posts from 2026-07-30 sat on page 3**, both still live:
+`W15QKN26QA120` (CSS 89921 Perimeter Fence Clearing, SBA set-aside, NAICS 238990, due 2026-08-20) and
+`FA489726Q0025` (Renovate Base Chapel, due 2026-08-24). They had sat 15 days. This is the same failure
+class as the Pass 2 bounded-read bug above, and it is how `W50S6N-26-Q-A021` was lost.
+
+In `detailed` mode a 0-reply post is identifiable by the **absence of any `Thread:` line** - processed
+posts print `Thread: N replies`. Scan every page for posts with no `Thread:` line; those are Pass 1
+work regardless of age. Four weeks is the floor because pipeline posts routinely carry 3-to-6 week
+runways, so anything newer than that can still be live.
 
 ---
 
@@ -291,8 +306,37 @@ Ask the user to paste or share the GovDash-generated proposal draft. Once receiv
 
 Once both Track A (completed Forms PDF) and Track B (updated proposal) are complete, stop and ask the user to review both documents before proceeding. Do not move to Stage 7 until the user explicitly confirms they have reviewed and approved both.
 
-Stage 7 - Final Package
-Once the user has approved both documents, read the current saved versions of both files directly from the local folders - do not use any version held in memory. The user may have edited and saved the Word doc after Claude's initial pass, so the file on disk is the authoritative version. Assemble the complete submission package using those files (updated proposal first, then the completed Forms PDF) and save it to the local Final Submission folder. Draft the submission email and save it to the local Final Submission folder as well.
+Stage 7 - Final Package (four volumes)
+Once the user has approved both documents, read the current saved versions of both files directly from the local folders - do not use any version held in memory. The user may have edited and saved the Word doc after Claude's initial pass, so the file on disk is the authoritative version. Then package the bid as FOUR separate volumes built from the approved proposal and forms, following the rules below. Save all volumes to the local Final Submission folder, and draft the submission email there as well.
+
+THE GOLDEN RULE: the solicitation always wins. The 4-volume structure below is the default. Before finalizing, reconcile it against this specific solicitation's Section L / Instructions to Offerors (or the instruction blocks of an SF-1442 / combined synopsis). If the RFP says something different - different file count, packaging, naming, or format - do exactly what the RFP says, not what this default says. Following the instructions exactly beats making it convenient.
+
+Default package - four separate files, never one combined PDF, each its own attachment:
+- Vol I - Technical / Management (PDF): technical approach, methodology, management plan, staffing, understanding of the requirement, risk mitigation.
+- Vol II - Past Performance (PDF): relevant prior contracts, references, CPARS/PPQs. Reference 02_Clients & Projects in Google Drive.
+- Vol III - Price / Cost (PDF + Excel): all pricing - rates, hours, escalation, option years, indirects. Built from the Stage 5 pricing workbook.
+- Vol IV - Contract Documentation (one combined, bookmarked PDF): the completed Forms PDF from Stage 6 Track A - signed SF-1442/SF-33 as the anchor, all SF-30 amendment acknowledgments, Reps & Certs (FAR 52.212-3), and any required certifications, in the order the RFP lists.
+
+Non-negotiable rules:
+1. Price is NEVER technical and NEVER merged. Vol III is standalone and firewalled - NO dollar figures anywhere in Vol I or Vol II. Technical evaluators usually may not see price; leaking it can get us rejected.
+2. All administrative forms go together in Vol IV as one combined, bookmarked PDF. The signed SF-1442/SF-33 is the anchor. Do not scatter forms into other volumes.
+3. Everything requiring a signature is signed - SF-1442/SF-33 by an authorized rep, every amendment acknowledged on an SF-30 - before the forms PDF goes out. (Leave signatures for the human per the Stage 6 rule; flag any that are still blank.)
+4. Match the RFP's file count and format exactly. Some RFPs split out extra files (subcontracting plan, OCI statement, cover letter) - could be more than 4; some want fewer. The instructions control.
+5. File naming: WilliamsDiversified_[SolNo]_VolX_[Name].pdf unless the RFP specifies otherwise. Upload each volume to its correct portal slot.
+
+Vol III Excel rule:
+- Government provides a pricing template -> use THEIR template exactly as provided (do not submit our own Excel) + signed PDF if a signed schedule is required.
+- No template provided -> our Excel workbook with live formulas intact + signed PDF.
+- RFP requires PDF only -> signed PDF; add Excel only if supplementary files are allowed.
+- Portal direct-entry -> enter pricing into the portal fields; a file upload may not be needed.
+Never substitute our own Excel for a required government template, and never flatten formulas to values unless told to lock the file.
+
+Title pages: add to Vol I and Vol II (and Vol III if it is a PDF; a light cover for Vol IV). Include company name, UEI (NVKEHRT5P2P3), CAGE (0QRJ4), solicitation number/title, agency, date, and POC.
+
+Before handing off, run the pre-submission check and report results to the user:
+- File count matches the RFP (default 4, confirm - could be more or fewer); submission method and destination confirmed; due date/time AND time zone confirmed.
+- Vol I within page limit (confirm title/TOC/dividers exclusions); pricing format correct (gov template used if provided, signed PDF if required, Excel formulas intact); NO price in Vol I or II; Vol IV is one combined bookmarked PDF with the signed SF-1442/SF-33 and every SF-30 acknowledged; title pages present.
+- File names follow the RFP convention; file sizes within portal/email limits; all PDFs open and are legible; Excel opens without errors.
 
 Then review the assembled package as if you were the contracting officer evaluating it against Section L and Section M. Call out:
 - Pain points: anything unclear, incomplete, non-compliant, or likely to lose points
