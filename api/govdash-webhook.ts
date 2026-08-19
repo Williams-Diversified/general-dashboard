@@ -54,11 +54,9 @@ interface VercelResponse {
  *
  * These env vars are injected automatically when the Vercel KV / Upstash
  * integration is attached to the project. If they are absent, or the store is
- * unreachable, we do NOT simply post anyway: that silent fail-open is what let
- * one requirement reach #pipeline two dozen times. Instead the degradation is
- * logged as an error and dedup falls back to scanning Slack history, so the
- * worst case is a weaker check rather than no check. We still never drop a real
- * opportunity - if both the ledger and the fallback are unavailable, we post.
+ * unreachable, dedup has no fallback (we deliberately do not read Slack history
+ * - the bot has no channel read scope). The degradation is logged as an error
+ * so it is visible, and we post rather than drop: never lose a real opportunity.
  */
 const KV_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -441,11 +439,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
   }
 
-  // `dedup` reports which mechanism is actually live, so a degraded ledger is
-  // visible from the Svix delivery log without digging through function logs.
+  // `dedup` reports whether the KV ledger is live, so a degraded ledger (dedup
+  // "none") is visible from the Svix delivery log without digging through logs.
   res.status(200).json({
     received: true,
-    dedup: KV_CONFIGURED ? 'kv' : 'slack-history',
+    dedup: KV_CONFIGURED ? 'kv' : 'none',
     solicitation: solicitationSource,
     notice: noticeStatus,
   });
