@@ -311,10 +311,12 @@ Once the user has approved both documents, read the current saved versions of bo
 
 THE GOLDEN RULE: the solicitation always wins. The 4-volume structure below is the default. Before finalizing, reconcile it against this specific solicitation's Section L / Instructions to Offerors (or the instruction blocks of an SF-1442 / combined synopsis). If the RFP says something different - different file count, packaging, naming, or format - do exactly what the RFP says, not what this default says. Following the instructions exactly beats making it convenient.
 
+SOURCE OF VOLUMES 1 AND 2: both come from the GovDash-generated proposal that the user approved in Stage 6 Track B. Use that document's own content AND its formatting - headers, fonts, layout, cover styling, colors - as-is. Do NOT rewrite it, re-lay-it-out, or restyle it into a new template; you are only splitting the approved GovDash proposal into the Volume 1 and Volume 2 files (Technical/Management content into Vol I, Past Performance content into Vol II) and adding the cover page. Volume 3 is NOT taken from the proposal - it is the pricing workbook built in Stage 5. Volume 4 is the forms PDF from Stage 6 Track A.
+
 Default package - four separate files, never one combined PDF, each its own attachment:
-- Vol I - Technical / Management (PDF): technical approach, methodology, management plan, staffing, understanding of the requirement, risk mitigation.
-- Vol II - Past Performance (PDF): relevant prior contracts, references, CPARS/PPQs. Reference 02_Clients & Projects in Google Drive.
-- Vol III - Price / Cost (PDF + Excel): all pricing - rates, hours, escalation, option years, indirects. Built from the Stage 5 pricing workbook.
+- Vol I - Technical / Management (PDF): the technical approach, methodology, management plan, staffing, understanding of the requirement, and risk mitigation - taken from the GovDash proposal in its existing format. Ends with the WD Standard Commitments section below.
+- Vol II - Past Performance (PDF): the past-performance content from the GovDash proposal (relevant prior contracts, references, CPARS/PPQs), in its existing format. Reference 02_Clients & Projects in Google Drive only to fill gaps the proposal leaves.
+- Vol III - Price / Cost (PDF + Excel): all pricing - rates, hours, escalation, option years, indirects. This is a pricing workbook built from the Stage 5 pricing - NOT pulled from the GovDash proposal (the proposal carries no price). Follow the Vol III Excel rule below.
 - Vol IV - Contract Documentation (one combined, bookmarked PDF): the completed Forms PDF from Stage 6 Track A - signed SF-1442/SF-33 as the anchor, all SF-30 amendment acknowledgments, Reps & Certs (FAR 52.212-3), and any required certifications, in the order the RFP lists.
 
 Vol I always ends with the section below - reproduce it verbatim as the final section of the Technical / Management volume, with "WD Standard Commitments" as a header. It contains no pricing, so it never breaches the Vol I/II price firewall.
