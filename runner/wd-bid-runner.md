@@ -267,6 +267,18 @@ All company information needed for forms and pricing lives in the Williams Diver
 - 02_Clients & Projects - past performance, project history
 - 03_Bidding & Pricing - rate cards, pricing history, templates
 - 04_CRM & Outreach - teaming partners, contacts
+- 05_Reference - the gold-standard reference bid. Read this before producing anything.
+
+THE REFERENCE PACKAGE - match it as closely as the solicitation allows:
+05_Reference holds one complete, accepted Williams Diversified bid (solicitation 140P6026Q0061) plus the master proposal template. It is the standard every bid you build should look and read like. Open these BEFORE you draft anything in Stages 5, 6, or 7, and keep them open as you work:
+- Proposal Template for Williams Diversified.docx - the master proposal template. Structure, section order, heading hierarchy, typography, and cover styling all come from here.
+- Volume 1 Technical - 140P6026Q0061.pdf - reference Vol I. Match its section order, depth of technical detail, and how win themes are stated.
+- Volume 2 Past Performance - 140P6026Q0061.pdf - reference Vol II. Match its project write-up format, reference block layout, and note that it carries no dollar figures.
+- Volume 3 Price - 140P6026Q0061.pdf - reference Vol III. Match its schedule layout, line-item granularity, and how option years and indirects are presented.
+- Volume 4 Contract Documentation - 140P6026Q0061.pdf - reference Vol IV. Match its form order and bookmark structure.
+- WilliamsDiversified_140P6026Q0061_PriceSchedule.xlsx - the reference pricing workbook. Match its tab structure, column headings, formula approach, and rollup logic.
+
+Precedence when these conflict: the SOLICITATION wins first (see the Golden Rule in Stage 7), the reference package wins second, and the generic defaults written in this prompt win last. Never copy content, project names, past performance, or numbers out of the reference bid into a new bid - 140P6026Q0061 is a different job. Copy the STRUCTURE, FORMAT, LEVEL OF DETAIL, and VOICE only. If you deviate from the reference package on anything substantive, say so and say why.
 
 Do NOT create folders or upload anything to Google Drive. All output files live locally on the computer.
 
@@ -295,6 +307,8 @@ Using the solicitation documents, draft a full capture plan covering: win themes
 Stage 5 - Pricing
 Pull the applicable Davis-Bacon Act or Service Contract Act wage determination for [location] from SAM.gov. Reference the 03_Bidding & Pricing folder in Google Drive for WD's rate cards and pricing history. Build a fully burdened labor rate sheet covering every trade and labor category required by the scope of work. Produce a complete line-item cost estimate broken down by trade, phase, materials, equipment, and overhead. Fill in all pricing numbers with your best estimates. Save the completed Pricing workbook to the local Pricing folder.
 
+Build this workbook on the reference: open WilliamsDiversified_140P6026Q0061_PriceSchedule.xlsx in 05_Reference and mirror its tab structure, column headings, formula approach, and rollup logic. Match how it separates direct labor, burden, materials, equipment, indirects, and fee, and how it presents option years. Keep every formula live - do not hardcode computed values. The numbers are this job's; the shape of the workbook is the reference's. If the government supplies its own pricing template, that template overrides the reference and you use theirs exactly as provided.
+
 Stage 6 - Forms Fill and Proposal Review
 This stage has two parallel tracks:
 
@@ -303,6 +317,8 @@ Using the pdf-form-filler skill, retrieve all required forms identified in Stage
 
 Track B - Proposal (wait for user):
 Ask the user to paste or share the GovDash-generated proposal draft. Once received, review it against all Section L and Section M requirements identified in Stage 3. Add any missing content needed to fully address every requirement, tighten win themes from the Stage 4 capture plan, and ensure it complies with all page limits and evaluation criteria. Do not change any formatting - do not touch headers, colors, fonts, layout, or the cover page. Only add or adjust written content. Save the updated proposal to the local Solicitation Docs folder.
+
+Review it against the reference too. Open Proposal Template for Williams Diversified.docx and the reference Vol I and Vol II PDFs in 05_Reference, and check the GovDash draft for anything the reference covers that this draft does not: missing sections, thinner technical detail, win themes stated weakly, past-performance write-ups in a different format. Add the missing CONTENT to bring it up to the reference standard. Do not restyle the draft to match the template - formatting stays untouched per the rule above. Report any place where the draft falls short of the reference and what you added to close the gap.
 
 Once both Track A (completed Forms PDF) and Track B (updated proposal) are complete, stop and ask the user to review both documents before proceeding. Do not move to Stage 7 until the user explicitly confirms they have reviewed and approved both.
 
@@ -313,7 +329,9 @@ THE GOLDEN RULE: the solicitation always wins. The 4-volume structure below is t
 
 SOURCE OF VOLUMES 1 AND 2: both come from the GovDash-generated proposal that the user approved in Stage 6 Track B. Use that document's own content AND its formatting - headers, fonts, layout, cover styling, colors - as-is. Do NOT rewrite it, re-lay-it-out, or restyle it into a new template; you are only splitting the approved GovDash proposal into the Volume 1 and Volume 2 files (Technical/Management content into Vol I, Past Performance content into Vol II) and adding the cover page. Volume 3 is NOT taken from the proposal - it is the pricing workbook built in Stage 5. Volume 4 is the forms PDF from Stage 6 Track A.
 
-FILE FORMAT - save every generated volume as an EDITABLE Word document (.docx), never a flattened PDF. The human needs to open and edit each one before it goes out. The narrative volumes (Vol I, Vol II) and any narrative/price-schedule pages of Vol III are .docx; Vol III's workbook stays a live .xlsx. Vol IV is the exception - it is assembled from the government's official signed form PDFs, which stay PDF (they cannot be Word). Convert the narrative volumes to the RFP's required submission format (usually PDF) only as the final step, after the human has edited and approved them - keep the editable .docx source in the Final Submission folder alongside whatever is submitted.
+BUILD EACH VOLUME AGAINST ITS REFERENCE COUNTERPART. Before you assemble a volume, open the matching PDF in 05_Reference (Volume 1 Technical, Volume 2 Past Performance, Volume 3 Price, Volume 4 Contract Documentation - all suffixed 140P6026Q0061) and match it on: section order, heading hierarchy, cover page layout, depth of detail, table and exhibit formatting, and bookmark structure. The finished package should be recognizable as the same firm's work product as the reference. Content is this solicitation's; form is the reference's. Where the RFP's Section L dictates something different, the RFP wins and you note the deviation.
+
+FILE FORMAT - save every generated volume as an EDITABLE Word document (.docx), never a flattened PDF. The human needs to open and edit each one before it goes out. The narrative volumes (Vol I, Vol II) and any narrative/price-schedule pages of Vol III are .docx; Vol III's workbook stays a live .xlsx. Vol IV is the exception - it is assembled from the government's official form PDFs, which stay as fillable PDFs and are NEVER converted to Word. Recreating an SF-1442/SF-30 as a Word document counts as fabricating a government form (automatic disqualification), so Vol IV stays PDF. Those official forms are still editable as fillable PDFs, so the human can revise field values before signing - editability is preserved without leaving the official file format. Convert the narrative volumes to the RFP's required submission format (usually PDF) only as the final step, after the human has edited and approved them - keep the editable .docx source in the Final Submission folder alongside whatever is submitted.
 
 Default package - four separate files, never one combined file, each its own attachment:
 - Vol I - Technical / Management (.docx): the technical approach, methodology, management plan, staffing, understanding of the requirement, and risk mitigation - taken from the GovDash proposal in its existing format. Ends with the WD Standard Commitments section below.
@@ -342,7 +360,7 @@ Non-negotiable rules:
 2. All administrative forms go together in Vol IV as one combined, bookmarked PDF. The signed SF-1442/SF-33 is the anchor. Do not scatter forms into other volumes.
 3. Everything requiring a signature is signed - SF-1442/SF-33 by an authorized rep, every amendment acknowledged on an SF-30 - before the forms PDF goes out. (Leave signatures for the human per the Stage 6 rule; flag any that are still blank.)
 4. Match the RFP's file count and format exactly. Some RFPs split out extra files (subcontracting plan, OCI statement, cover letter) - could be more than 4; some want fewer. The instructions control.
-5. File naming: WilliamsDiversified_[SolNo]_VolX_[Name].pdf unless the RFP specifies otherwise. Upload each volume to its correct portal slot.
+5. File naming: follow the reference package convention in 05_Reference unless the RFP specifies otherwise. That is "Volume [N] [Short Name] - [SolNo].pdf" for the four volumes (e.g. Volume 1 Technical - [SolNo].pdf, Volume 2 Past Performance - [SolNo].pdf, Volume 3 Price - [SolNo].pdf, Volume 4 Contract Documentation - [SolNo].pdf) and "WilliamsDiversified_[SolNo]_PriceSchedule.xlsx" for the pricing workbook. Upload each volume to its correct portal slot.
 
 Vol III Excel rule:
 - Government provides a pricing template -> use THEIR template exactly as provided (do not submit our own Excel) + signed PDF if a signed schedule is required.
@@ -364,7 +382,8 @@ Before handing off, run the pre-submission check and report results to the user:
 - File count matches the RFP (default 4, confirm - could be more or fewer); submission method and destination confirmed; due date/time AND time zone confirmed.
 - Vol I within page limit (confirm title/TOC/dividers exclusions); pricing format correct (gov template used if provided, signed PDF if required, Excel formulas intact); NO price in Vol I or II; Vol IV is one combined bookmarked PDF with the signed SF-1442/SF-33 and every SF-30 acknowledged; title pages present.
 - Every generated volume is a working .docx (editable), Vol III workbook is a live .xlsx, and Vol IV is the forms PDF; the RFP-format export (usually PDF) is produced only after the human edits and approves.
-- File names follow the RFP convention; file sizes within portal/email limits; documents open and are legible; Excel opens without errors.
+- File names follow the RFP convention, or the 05_Reference convention where the RFP is silent; file sizes within portal/email limits; documents open and are legible; Excel opens without errors.
+- Reference conformance: put each finished volume side by side with its counterpart in 05_Reference and confirm section order, heading hierarchy, cover layout, and level of detail line up. List every place this package departs from the reference and say whether the RFP forced it or it was your judgment call.
 
 Then review the assembled package as if you were the contracting officer evaluating it against Section L and Section M. Call out:
 - Pain points: anything unclear, incomplete, non-compliant, or likely to lose points
